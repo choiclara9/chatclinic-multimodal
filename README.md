@@ -12,6 +12,34 @@ This MVP is a starting point for an OpenEvidence-like genomics assistant:
 - run a GPT-backed intake conversation before analysis starts
 - keep IGV and annotation detail available below the summary
 
+## Quick Start For Contributors
+
+1. Clone the repository.
+2. Create your local environment file from the template.
+3. Add your own OpenAI API key to `.env`.
+4. Install Python and frontend dependencies.
+5. Start the API and frontend.
+
+```bash
+git clone https://github.com/bispl-create/chatgenome.git
+cd chatgenome
+cp .env.example .env
+```
+
+Then edit `.env` and set your own key:
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_WORKFLOW_MODEL=gpt-5-nano
+OPENAI_MODEL=gpt-5-mini
+```
+
+Notes:
+
+- keep `.env` local only; it is excluded from git
+- do not commit your personal API key
+- if you do not set `OPENAI_API_KEY`, the app still runs in deterministic fallback mode
+
 ## What This Prototype Does
 
 - accepts a local VCF upload through FastAPI
