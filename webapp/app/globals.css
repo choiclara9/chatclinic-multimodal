@@ -245,6 +245,43 @@ input {
   font: inherit;
 }
 
+.composerInput {
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+
+.composerInputTriggered {
+  border-color: rgba(34, 63, 88, 0.55);
+  box-shadow: 0 0 0 3px rgba(34, 63, 88, 0.12);
+  background: linear-gradient(180deg, #fffdfa, #f5f7fb);
+  font-weight: 700;
+}
+
+.composerTriggerBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.composerTriggerLabel {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.composerTriggerChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(34, 63, 88, 0.18);
+  background: rgba(34, 63, 88, 0.1);
+  color: var(--accent);
+  font-family: "SFMono-Regular", Menlo, monospace;
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
 select {
   width: 100%;
   padding: 14px 16px;

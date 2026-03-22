@@ -40,6 +40,8 @@ from app.models import (
     SamtoolsResponse,
     SummaryStatsRowsRequest,
     SummaryStatsRowsResponse,
+    SummaryStatsChatRequest,
+    SummaryStatsChatResponse,
     SummaryStatsResponse,
     SymbolicAltSummary,
     ToolInfo,
@@ -50,7 +52,7 @@ from app.models import (
 )
 from app.services.annotation import build_draft_answer, build_ui_cards
 from app.services.candidate_ranking import build_ranked_candidates
-from app.services.chat import answer_analysis_chat, answer_raw_qc_chat
+from app.services.chat import answer_analysis_chat, answer_raw_qc_chat, answer_summary_stats_chat
 from app.services.fastqc import FASTQC_OUTPUT_DIR
 from app.services.filtering import run_filter
 from app.services.gatk_liftover import run_gatk_liftover_vcf
@@ -494,6 +496,11 @@ def chat_about_analysis(request: AnalysisChatRequest) -> AnalysisChatResponse:
 @app.post("/api/v1/chat/raw-qc", response_model=RawQcChatResponse)
 def chat_about_raw_qc(request: RawQcChatRequest) -> RawQcChatResponse:
     return answer_raw_qc_chat(request)
+
+
+@app.post("/api/v1/chat/summary-stats", response_model=SummaryStatsChatResponse)
+def chat_about_summary_stats(request: SummaryStatsChatRequest) -> SummaryStatsChatResponse:
+    return answer_summary_stats_chat(request)
 
 
 @app.post("/api/v1/workflow/start", response_model=WorkflowAgentResponse)

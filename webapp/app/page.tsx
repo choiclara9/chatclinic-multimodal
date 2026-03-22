@@ -327,6 +327,12 @@ type SummaryStatsRowsResponse = {
   has_more: boolean;
 };
 
+type SummaryStatsChatResponse = {
+  answer: string;
+  citations: string[];
+  used_fallback: boolean;
+};
+
 type ChatMessage = {
   role: "assistant" | "user";
   content: string;
@@ -828,6 +834,9 @@ export default function Page() {
     }
     return `plink2 --vcf ${inputPath} dosage=DS ${flags.join(" ")} --out ${outputPrefix}`.trim();
   }, [analysis, plinkConfig]);
+  const groundingTokens = ["$studio", "$current analysis", "$current card", "$grounded"];
+  const normalizedComposerText = typeof composerText === "string" ? composerText.toLowerCase() : "";
+  const detectedGroundingTriggers = groundingTokens.filter((token) => normalizedComposerText.includes(token));
 
   useEffect(() => {
     if (!analysis) {
@@ -1157,12 +1166,8 @@ export default function Page() {
     }
 
     if (summaryStatsAnalysis) {
-      addMessage({ role: "user", content: text });
-      addMessage({
-        role: "assistant",
-        content: "Summary statistics intake는 준비되었습니다. 먼저 Studio의 `Summary Stats Review` 카드에서 컬럼과 QC를 확인해 주세요.",
-      });
       setComposerText("");
+      await handleAskSummaryStatsQuestion(text);
       return;
     }
 
@@ -1431,6 +1436,42 @@ export default function Page() {
         );
         setActiveStudioView("samtools");
       }
+      setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
+      setFollowUpAnswer(payload.answer);
+      setStatus("Answer ready");
+    } catch (caught) {
+      const msg = caught instanceof Error ? caught.message : String(caught);
+      setAnalysisQa((current) => [
+        ...current,
+        { role: "assistant", content: `설명 요청 중 오류가 발생했습니다: ${msg}` },
+      ]);
+      setStatus("Answer failed");
+    }
+  }
+
+  async function handleAskSummaryStatsQuestion(questionText?: string) {
+    const text = questionText?.trim() ?? "";
+    if (!text || !summaryStatsAnalysis) {
+      return;
+    }
+
+    setStatus("Generating answer...");
+    setAnalysisQa((current) => [...current, { role: "user", content: text }]);
+
+    try {
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/chat/summary-stats`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: text,
+          analysis: summaryStatsAnalysis,
+          history: analysisQa.map((turn) => ({ role: turn.role, content: turn.content })),
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload: SummaryStatsChatResponse = await response.json();
       setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
       setFollowUpAnswer(payload.answer);
       setStatus("Answer ready");
@@ -2134,6 +2175,7 @@ export default function Page() {
 
             <div className="chatComposerDock">
               <input
+                className={detectedGroundingTriggers.length ? "composerInput composerInputTriggered" : "composerInput"}
                 value={composerText}
                 onChange={(event) => setComposerText(event.target.value)}
                 onCompositionStart={() => setIsComposing(true)}
@@ -2159,6 +2201,16 @@ export default function Page() {
                 →
               </button>
             </div>
+            {detectedGroundingTriggers.length ? (
+              <div className="composerTriggerBar">
+                <span className="composerTriggerLabel">Grounded mode</span>
+                {detectedGroundingTriggers.map((token) => (
+                  <span key={token} className="composerTriggerChip">
+                    {token}
+                  </span>
+                ))}
+              </div>
+            ) : null}
           </div>
         </section>
 

@@ -311,6 +311,18 @@ class SummaryStatsRowsResponse(BaseModel):
     has_more: bool
 
 
+class SummaryStatsChatRequest(BaseModel):
+    question: str
+    analysis: SummaryStatsResponse
+    history: list[ChatTurn] = []
+
+
+class SummaryStatsChatResponse(BaseModel):
+    answer: str
+    citations: list[str]
+    used_fallback: bool
+
+
 class WorkflowStartRequest(BaseModel):
     file_name: str
 

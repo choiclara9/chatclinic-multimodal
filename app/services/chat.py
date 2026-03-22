@@ -6,7 +6,14 @@ import re
 import urllib.request
 from pathlib import Path
 
-from app.models import AnalysisChatRequest, AnalysisChatResponse, RawQcChatRequest, RawQcChatResponse
+from app.models import (
+    AnalysisChatRequest,
+    AnalysisChatResponse,
+    RawQcChatRequest,
+    RawQcChatResponse,
+    SummaryStatsChatRequest,
+    SummaryStatsChatResponse,
+)
 from app.models import (
     GatkLiftoverVcfRequest,
     LDBlockShowRequest,
@@ -79,6 +86,11 @@ def _flatten_studio_context(studio_context: dict) -> dict[str, object]:
         "snpeff_preview": studio_context.get("snpeff_preview"),
         "selected_annotation": studio_context.get("selected_annotation"),
     }
+
+
+def _has_studio_trigger(question: str) -> bool:
+    lowered = question.lower()
+    return any(token in lowered for token in ("$studio", "$current analysis", "$current card", "$grounded"))
 
 
 def _compact_analysis_context(payload: AnalysisChatRequest) -> dict[str, object]:
@@ -182,6 +194,8 @@ def _compact_analysis_context(payload: AnalysisChatRequest) -> dict[str, object]
 
 
 def _studio_guided_answer(payload: AnalysisChatRequest) -> AnalysisChatResponse | None:
+    if not _has_studio_trigger(payload.question):
+        return None
     studio = payload.studio_context or {}
     if not studio:
         return None
@@ -393,25 +407,36 @@ def _call_openai(payload: AnalysisChatRequest) -> AnalysisChatResponse:
     if not api_key:
         return _fallback_answer(payload)
 
-    compact_context = _compact_analysis_context(payload)
-    system_prompt = (
-        "You are a genomics analysis copilot. Answer only from the provided VCF analysis context. "
-        "Do not invent variant facts. Be concise, grounded, and mention uncertainty. "
-        "Treat analysis.used_tools as the authoritative record of which deterministic tools were actually run in the current analysis. "
-        "Do not claim that a tool was used unless it appears in analysis.used_tools or the user explicitly requests a new run. "
-        "Do not infer tool execution only from card names such as VEP consequence summaries. "
-        "Treat studio_context as part of the trusted analysis state, including ROH, coverage, candidate, ClinVar, and consequence summaries when present. "
-        "When possible, cite reference ids like REF1 or REF4 inline. "
-        "Format the answer in clean Markdown with short sections or bullet points when helpful. "
-        "If the user asks for explanation, prefer structured bullets over dense prose."
-    )
+    grounded = _has_studio_trigger(payload.question)
+    if grounded:
+        compact_context = _compact_analysis_context(payload)
+        system_prompt = (
+            "You are a genomics analysis copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer from the provided VCF analysis context and do not invent variant facts. "
+            "Treat analysis.used_tools as the authoritative record of which deterministic tools were actually run in the current analysis. "
+            "Do not claim that a tool was used unless it appears in analysis.used_tools or the user explicitly requests a new run. "
+            "Do not infer tool execution only from card names such as VEP consequence summaries. "
+            "Treat studio_context as part of the trusted analysis state, including ROH, coverage, candidate, ClinVar, and consequence summaries when present. "
+            "When possible, cite reference ids like REF1 or REF4 inline. "
+            "Format the answer in clean Markdown with short sections or bullet points when helpful. "
+            "Label the answer as analysis-grounded."
+        )
+        user_content = (
+            "Question:\n"
+            f"{payload.question}\n\n"
+            "Analysis context JSON:\n"
+            f"{json.dumps(compact_context, ensure_ascii=False)}"
+        )
+    else:
+        system_prompt = (
+            "You are a helpful general assistant. "
+            "The user did not request analysis grounding. "
+            "Answer from general knowledge only and ignore any uploaded analysis/studio context. "
+            "Do not mention analysis context, Studio cards, or uploaded-file facts unless the user explicitly asks with a grounding trigger such as $studio."
+        )
+        user_content = payload.question
     history_lines = [{"role": turn.role, "content": turn.content} for turn in payload.history[-6:]]
-    user_content = (
-        "Question:\n"
-        f"{payload.question}\n\n"
-        "Analysis context JSON:\n"
-        f"{json.dumps(compact_context, ensure_ascii=False)}"
-    )
     body = {
         "model": model,
         "input": [
@@ -854,18 +879,29 @@ def answer_raw_qc_chat(payload: RawQcChatRequest) -> RawQcChatResponse:
         "facts": payload.analysis.facts.model_dump(),
         "modules": [item.model_dump() for item in payload.analysis.modules[:12]],
     }
-    system_prompt = (
-        "You are a sequencing QC copilot. Answer only from the provided FastQC context. "
-        "Do not invent QC metrics. Be concise, grounded, and practical. "
-        "If there are WARN or FAIL modules, explain why they matter for downstream genomics workflows."
-    )
+    grounded = _has_studio_trigger(payload.question)
+    if grounded:
+        system_prompt = (
+            "You are a sequencing QC copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer from the provided FastQC context and do not invent QC metrics. "
+            "Be concise, grounded, and practical. "
+            "If there are WARN or FAIL modules, explain why they matter for downstream genomics workflows."
+        )
+        user_content = (
+            "Question:\n"
+            f"{payload.question}\n\n"
+            "FastQC context JSON:\n"
+            f"{json.dumps(compact_context, ensure_ascii=False)}"
+        )
+    else:
+        system_prompt = (
+            "You are a helpful general assistant. "
+            "The user did not request analysis grounding. "
+            "Answer from general knowledge only and ignore any uploaded FastQC/raw-QC context unless the user explicitly asks with a grounding trigger such as $studio."
+        )
+        user_content = payload.question
     history_lines = [{"role": turn.role, "content": turn.content} for turn in payload.history[-6:]]
-    user_content = (
-        "Question:\n"
-        f"{payload.question}\n\n"
-        "FastQC context JSON:\n"
-        f"{json.dumps(compact_context, ensure_ascii=False)}"
-    )
     body = {
         "model": model,
         "input": [
@@ -898,3 +934,101 @@ def answer_raw_qc_chat(payload: RawQcChatRequest) -> RawQcChatResponse:
         return RawQcChatResponse(answer=output_text or _fallback_raw_qc_answer(payload).answer, citations=[], used_fallback=False)
     except Exception:
         return _fallback_raw_qc_answer(payload)
+
+
+def _fallback_summary_stats_answer(payload: SummaryStatsChatRequest) -> SummaryStatsChatResponse:
+    analysis = payload.analysis
+    mapped = analysis.mapped_fields.model_dump(exclude_none=True)
+    mapped_lines = [f"- {key}: {value}" for key, value in mapped.items()]
+    answer = (
+        f"Summary statistics file `{analysis.file_name}` was loaded.\n\n"
+        f"- Rows detected: {analysis.row_count}\n"
+        f"- Genome build: {analysis.genome_build}\n"
+        f"- Trait type: {analysis.trait_type}\n"
+        f"- Columns detected: {len(analysis.detected_columns)}\n"
+        f"- Auto-mapped fields: {len(mapped)}\n\n"
+        f"{chr(10).join(mapped_lines) if mapped_lines else '- No mapped fields are available yet.'}"
+    )
+    return SummaryStatsChatResponse(answer=answer, citations=[], used_fallback=True)
+
+
+def answer_summary_stats_chat(payload: SummaryStatsChatRequest) -> SummaryStatsChatResponse:
+    api_key = os.getenv("OPENAI_API_KEY")
+    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+    if not api_key:
+        return _fallback_summary_stats_answer(payload)
+
+    compact_context = {
+        "analysis_id": payload.analysis.analysis_id,
+        "file_name": payload.analysis.file_name,
+        "genome_build": payload.analysis.genome_build,
+        "trait_type": payload.analysis.trait_type,
+        "delimiter": payload.analysis.delimiter,
+        "detected_columns": payload.analysis.detected_columns,
+        "mapped_fields": payload.analysis.mapped_fields.model_dump(),
+        "row_count": payload.analysis.row_count,
+        "warnings": payload.analysis.warnings[:12],
+        "preview_rows": payload.analysis.preview_rows[:8],
+        "draft_answer": payload.analysis.draft_answer,
+        "used_tools": payload.analysis.used_tools,
+    }
+    grounded = _has_studio_trigger(payload.question)
+    if grounded:
+        system_prompt = (
+            "You are a post-GWAS and summary-statistics copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer from the provided summary statistics context. "
+            "When the answer is grounded in the uploaded file, distinguish that clearly from general knowledge. "
+            "Do not claim that a downstream tool has already been run unless it appears in used_tools."
+        )
+        user_content = (
+            "Question:\n"
+            f"{payload.question}\n\n"
+            "Summary statistics context JSON:\n"
+            f"{json.dumps(compact_context, ensure_ascii=False)}"
+        )
+    else:
+        system_prompt = (
+            "You are a helpful general assistant. "
+            "The user did not request analysis grounding. "
+            "Answer from general knowledge only and ignore any uploaded summary-statistics context unless the user explicitly asks with a grounding trigger such as $studio."
+        )
+        user_content = payload.question
+    history_lines = [{"role": turn.role, "content": turn.content} for turn in payload.history[-6:]]
+    body = {
+        "model": model,
+        "input": [
+            {"role": "system", "content": system_prompt},
+            *history_lines,
+            {"role": "user", "content": user_content},
+        ],
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        data=json.dumps(body).encode("utf-8"),
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=float(os.getenv("OPENAI_TIMEOUT_SECONDS", "20"))) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        output_text = result.get("output_text")
+        if not output_text:
+            output = result.get("output", [])
+            texts: list[str] = []
+            for item in output:
+                for content in item.get("content", []):
+                    if content.get("type") == "output_text":
+                        texts.append(content.get("text", ""))
+            output_text = "\n".join(texts).strip()
+        citations = sorted(set(re.findall(r"\bREF\d+\b", output_text or "")))
+        return SummaryStatsChatResponse(
+            answer=output_text or _fallback_summary_stats_answer(payload).answer,
+            citations=citations,
+            used_fallback=False,
+        )
+    except Exception:
+        return _fallback_summary_stats_answer(payload)
