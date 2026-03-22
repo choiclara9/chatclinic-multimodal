@@ -790,7 +790,6 @@ export default function Page() {
   const [isComposing, setIsComposing] = useState(false);
   const [analysisQa, setAnalysisQa] = useState<AnalysisQuestionTurn[]>([]);
   const [followUpAnswer, setFollowUpAnswer] = useState<string | null>(null);
-  const [initialGroundedAnswer, setInitialGroundedAnswer] = useState<string | null>(null);
   const [activeStudioView, setActiveStudioView] = useState<StudioView | null>(null);
   const [plinkRunning, setPlinkRunning] = useState(false);
   const [plinkConfig, setPlinkConfig] = useState({
@@ -805,7 +804,6 @@ export default function Page() {
   const studioCanvasRef = useRef<HTMLElement | null>(null);
   const chatStreamRef = useRef<HTMLDivElement | null>(null);
   const summaryStatsGridRef = useRef<HTMLDivElement | null>(null);
-  const initialSummaryRequestRef = useRef<string | null>(null);
   const activeToolRegistry =
     analysis?.tool_registry?.length
       ? analysis.tool_registry
@@ -943,12 +941,10 @@ export default function Page() {
     setRawQcAnalysis(null);
     setSummaryStatsAnalysis(null);
     setFollowUpAnswer(null);
-    setInitialGroundedAnswer(null);
     setAnalysisQa([]);
     setActiveStudioView(null);
     setSelectedAnnotationIndex(0);
     setAnnotationSearch("");
-    initialSummaryRequestRef.current = null;
     setError(null);
     if (isRawQcFileName(file.name)) {
       setStatus("Running FastQC...");
@@ -1111,12 +1107,11 @@ export default function Page() {
       const payload: AnalysisResponse = await response.json();
       setAnalysis(payload);
       setFollowUpAnswer(null);
-      setInitialGroundedAnswer(null);
       setAnalysisQa([]);
       setActiveStudioView(null);
       setSelectedAnnotationIndex(0);
       setComposerText("");
-      setStatus("Preparing grounded summary...");
+      setStatus("Analysis ready");
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
       setError(message);
@@ -1440,7 +1435,7 @@ export default function Page() {
       : Math.min(selectedAnnotationIndex, searchedAnnotations.length - 1);
   const selectedAnnotation = searchedAnnotations[safeSelectedIndex] ?? searchedAnnotations[0] ?? null;
   const summaryText = analysis
-    ? formatSummaryWithCitations(initialGroundedAnswer ?? analysis.draft_answer, analysis.references)
+    ? formatSummaryWithCitations(analysis.draft_answer, analysis.references)
     : rawQcAnalysis
       ? rawQcAnalysis.draft_answer
       : summaryStatsAnalysis
@@ -1457,9 +1452,6 @@ export default function Page() {
     if (status === "Preparing analysis...") {
       return "The VCF is attached. ChatGenome is starting the default representative analysis run.";
     }
-    if (status === "Preparing grounded summary...") {
-      return "The VCF analysis is finished. ChatGenome is now composing the first grounded summary from the current Studio results.";
-    }
     if (status === "Analyzing") {
       return "Reading the VCF, attaching deterministic annotation, and preparing grounded outputs.";
     }
@@ -1471,9 +1463,6 @@ export default function Page() {
     }
     if (status === "Answer ready") {
       return "The latest answer is ready in Chat and grounded against the current analysis context.";
-    }
-    if (status === "Grounded summary ready") {
-      return "The initial grounded summary is ready. You can continue asking questions about any Studio result.";
     }
     if (status === "Raw QC ready") {
       return "FastQC finished. You can inspect the module summary in Studio and ask follow-up questions in chat.";
@@ -1495,7 +1484,6 @@ export default function Page() {
   const chatHeaderStatus =
     status === "Generating answer..." ||
     status === "Preparing analysis..." ||
-    status === "Preparing grounded summary..." ||
     status === "Analyzing" ||
     status === "Running FastQC..." ||
     status === "Loading summary statistics..." ||
@@ -1882,46 +1870,6 @@ export default function Page() {
     selectedAnnotation,
     symbolicAnnotations,
   ]);
-
-  useEffect(() => {
-    async function generateInitialGroundedSummary() {
-      if (!analysis) {
-        return;
-      }
-      setStatus("Preparing grounded summary...");
-      try {
-        const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/chat/analysis`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            question:
-              "$studio Provide an initial grounded summary of this VCF analysis. Combine the backend draft_answer with the current studio_context explicitly, including QC, clinical coverage, symbolic ALT review, ROH/recessive review, candidate variants, ClinVar review, and VEP consequence.",
-            analysis,
-            history: [],
-            studio_context: studioContext,
-          }),
-        });
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
-        const payload = await response.json();
-        setInitialGroundedAnswer(payload.answer);
-        setStatus("Grounded summary ready");
-      } catch {
-        setInitialGroundedAnswer(null);
-        setStatus("Grounded summary ready");
-      }
-    }
-
-    if (!analysis) {
-      return;
-    }
-    if (initialSummaryRequestRef.current === analysis.analysis_id) {
-      return;
-    }
-    initialSummaryRequestRef.current = analysis.analysis_id;
-    void generateInitialGroundedSummary();
-  }, [analysis, apiBase, studioContext]);
 
   function openStudioView(view: StudioView) {
     setActiveStudioView(view);
