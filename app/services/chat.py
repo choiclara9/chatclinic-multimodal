@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import urllib.request
 from pathlib import Path
 
 from app.models import AnalysisChatRequest, AnalysisChatResponse, RawQcChatRequest, RawQcChatResponse
-from app.models import LDBlockShowRequest, LDBlockShowResponse, OpenCravatRequest, OpenCravatResponse, SnpEffRequest
+from app.models import LDBlockShowRequest, LDBlockShowResponse, SnpEffRequest
 from app.services.ldblockshow import run_ldblockshow
-from app.services.opencravat import OPENCRAVAT_OUTPUT_DIR, load_opencravat_result, run_opencravat
 from app.services.snpeff import run_snpeff
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -19,7 +17,6 @@ PLUGINS_DIR = ROOT_DIR / "plugins"
 def _load_direct_tool_routing_specs() -> list[dict[str, object]]:
     specs: list[dict[str, object]] = []
     for tool_name in (
-        "opencravat_execution_tool",
         "ldblockshow_execution_tool",
         "snpeff_execution_tool",
     ):
@@ -127,19 +124,6 @@ def _compact_analysis_context(payload: AnalysisChatRequest) -> dict[str, object]
                 ],
             }
             if payload.analysis.snpeff_result
-            else None
-        ),
-        "opencravat_result": (
-            {
-                "tool": payload.analysis.opencravat_result.tool,
-                "genome": payload.analysis.opencravat_result.genome,
-                "status": payload.analysis.opencravat_result.status,
-                "variant_table_path": payload.analysis.opencravat_result.variant_table_path,
-                "preview_rows": [
-                    item.columns for item in payload.analysis.opencravat_result.preview_rows[:5]
-                ],
-            }
-            if payload.analysis.opencravat_result
             else None
         ),
         "ldblockshow_result": (
@@ -316,40 +300,6 @@ def _studio_guided_answer(payload: AnalysisChatRequest) -> AnalysisChatResponse 
         )
         return AnalysisChatResponse(answer=answer, citations=citations, used_fallback=False)
 
-    if "opencravat" in question or "open cravat" in question:
-        result = payload.analysis.opencravat_result
-        if result is None:
-            answer = (
-                "현재 분석 컨텍스트에는 OpenCRAVAT 실행 결과가 없습니다.\n\n"
-                "- 즉, 이 분석에서 OpenCRAVAT가 실행되었다고 확인할 수 있는 artifact가 아직 없습니다.\n"
-                "- 원하시면 `Run OpenCRAVAT on this VCF`처럼 명시적으로 실행 요청을 하거나, "
-                "OpenCRAVAT가 포함된 새 분석을 다시 실행해야 합니다."
-            )
-            return AnalysisChatResponse(answer=answer, citations=citations, used_fallback=False)
-
-        preview_lines = [
-            "- "
-            + " | ".join(f"{key}={value}" for key, value in list(item.columns.items())[:6])
-            for item in result.preview_rows[:5]
-        ]
-        artifact = result.variant_table_path or result.text_report_path or result.sqlite_path or "not available"
-        note_line = f"- note: {result.error_message}" if result.error_message else None
-        answer = (
-            "OpenCRAVAT Review 카드 설명입니다.\n\n"
-            "1. 현재 실행 상태\n"
-            f"- status: {result.status or 'unknown'}\n"
-            f"- genome: {result.genome}\n"
-            f"- primary artifact: {artifact}\n"
-            f"{note_line + chr(10) if note_line else ''}\n"
-            "2. preview rows\n"
-            f"{chr(10).join(preview_lines) if preview_lines else '- preview rows가 없습니다.'}\n\n"
-            "3. 해석\n"
-            "- OpenCRAVAT는 composite annotation을 붙이는 보조 도구입니다.\n"
-            "- status가 `Error`여도 일부 intermediate artifact가 생성되어 preview가 보일 수 있습니다.\n"
-            "- 최종 해석은 candidate ranking, ClinVar, consequence 결과와 함께 봐야 합니다."
-        )
-        return AnalysisChatResponse(answer=answer, citations=citations, used_fallback=False)
-
     if "ldblockshow" in question or "ld block" in question or "ld heatmap" in question:
         result = payload.analysis.ldblockshow_result
         if result is None:
@@ -498,101 +448,6 @@ def _snpeff_genome_from_build(build_guess: str | None) -> str:
     return "GRCh37.75"
 
 
-def _handle_opencravat_request(payload: AnalysisChatRequest) -> AnalysisChatResponse:
-    source_vcf_path = payload.analysis.source_vcf_path
-    if not source_vcf_path:
-        opencravat_result = OpenCravatResponse(
-            tool="opencravat",
-            genome="unknown",
-            input_path="",
-            output_dir="",
-            run_name="",
-            command_preview="oc run <source.vcf> ...",
-            status="Error",
-            error_message="The current analysis context does not include a source VCF path.",
-        )
-        return AnalysisChatResponse(
-            answer="The current analysis context does not include a source VCF path, so OpenCRAVAT cannot be run from this chat turn.",
-            citations=[],
-            used_fallback=True,
-            used_tools=["opencravat_execution_tool"],
-            opencravat_result=opencravat_result,
-        )
-
-    genome_guess = (payload.analysis.facts.genome_build_guess or "").lower()
-    genome = "hg38" if any(token in genome_guess for token in ("38", "hg38", "grch38")) else "hg19"
-    run_name = f"{payload.analysis.analysis_id}-opencravat"
-
-    if payload.analysis.opencravat_result and payload.analysis.opencravat_result.run_name == run_name:
-        existing = payload.analysis.opencravat_result
-        status_line = existing.status or "unknown"
-        artifact_line = existing.text_report_path or existing.variant_table_path or existing.sqlite_path or "not available"
-        return AnalysisChatResponse(
-            answer=(
-                f"OpenCRAVAT results are already available for the current VCF using genome `{existing.genome}`.\n\n"
-                f"- Status: `{status_line}`\n"
-                f"- Primary artifact: `{artifact_line}`\n"
-                f"- Preview rows: {len(existing.preview_rows)}\n\n"
-                "The existing OpenCRAVAT Review card has been reused instead of rerunning the tool."
-            ),
-            citations=[],
-            used_fallback=False,
-            used_tools=["opencravat_execution_tool"],
-            opencravat_result=existing,
-        )
-
-    cached = load_opencravat_result(
-        genome=genome,
-        input_path=source_vcf_path,
-        output_dir=OPENCRAVAT_OUTPUT_DIR,
-        run_name=run_name,
-        preview_limit=5,
-    )
-    if cached is not None:
-        status_line = cached.status or "unknown"
-        artifact_line = cached.text_report_path or cached.variant_table_path or cached.sqlite_path or "not available"
-        return AnalysisChatResponse(
-            answer=(
-                f"OpenCRAVAT cached results were found for the current VCF using genome `{cached.genome}`.\n\n"
-                f"- Status: `{status_line}`\n"
-                f"- Primary artifact: `{artifact_line}`\n"
-                f"- Preview rows: {len(cached.preview_rows)}\n\n"
-                "The existing OpenCRAVAT Review card has been restored without rerunning the tool."
-            ),
-            citations=[],
-            used_fallback=False,
-            used_tools=["opencravat_execution_tool"],
-            opencravat_result=cached,
-        )
-
-    result = run_opencravat(
-        OpenCravatRequest(
-            vcf_path=source_vcf_path,
-            genome=genome,
-            run_name=run_name,
-            report_types=["text"],
-            preview_limit=5,
-        )
-    )
-
-    status_line = result.status or "unknown"
-    artifact_line = result.text_report_path or result.variant_table_path or result.sqlite_path or "not available"
-    answer = (
-        f"OpenCRAVAT was run on the current VCF using genome `{result.genome}`.\n\n"
-        f"- Status: `{status_line}`\n"
-        f"- Primary artifact: `{artifact_line}`\n"
-        f"- Preview rows: {len(result.preview_rows)}\n\n"
-        "The Studio card has been updated with the latest OpenCRAVAT result."
-    )
-    return AnalysisChatResponse(
-        answer=answer,
-        citations=[],
-        used_fallback=False,
-        used_tools=["opencravat_execution_tool"],
-        opencravat_result=result,
-    )
-
-
 def _handle_snpeff_request(payload: AnalysisChatRequest) -> AnalysisChatResponse:
     source_vcf_path = payload.analysis.source_vcf_path
     if not source_vcf_path:
@@ -702,6 +557,20 @@ def _handle_ldblockshow_request(payload: AnalysisChatRequest) -> AnalysisChatRes
 
 def answer_analysis_chat(payload: AnalysisChatRequest) -> AnalysisChatResponse:
     direct_tool = _match_direct_tool_request(payload.question)
+    lowered_question = payload.question.lower()
+
+    if "opencravat" in lowered_question or "open cravat" in lowered_question:
+        return AnalysisChatResponse(
+            answer=(
+                "OpenCRAVAT is not available in this ChatGenome build.\n\n"
+                "- The OpenCRAVAT plugin and Studio card have been removed because the runtime was unstable.\n"
+                "- So this request did not run OpenCRAVAT.\n"
+                "- If you want additional deterministic annotation, please use the currently supported tools such as SnpEff, CADD lookup, or REVEL lookup."
+            ),
+            citations=[],
+            used_fallback=False,
+            used_tools=[],
+        )
 
     if direct_tool and direct_tool.get("name") == "ldblockshow_execution_tool":
         try:
@@ -722,30 +591,6 @@ def answer_analysis_chat(payload: AnalysisChatRequest) -> AnalysisChatResponse:
                     attempted_regions=[region] if region != "unknown" else [],
                     warnings=[str(exc)],
                 ),
-            )
-
-    if direct_tool and direct_tool.get("name") == "opencravat_execution_tool":
-        try:
-            return _handle_opencravat_request(payload)
-        except Exception as exc:
-            genome_guess = (payload.analysis.facts.genome_build_guess or "").lower()
-            genome = "hg38" if any(token in genome_guess for token in ("38", "hg38", "grch38")) else "hg19"
-            opencravat_result = OpenCravatResponse(
-                tool="opencravat",
-                genome=genome,
-                input_path=payload.analysis.source_vcf_path or "",
-                output_dir="",
-                run_name=f"{payload.analysis.analysis_id}-opencravat",
-                command_preview="oc run <source.vcf> ...",
-                status="Error",
-                error_message=str(exc),
-            )
-            return AnalysisChatResponse(
-                answer=f"OpenCRAVAT execution failed: {exc}",
-                citations=[],
-                used_fallback=True,
-                used_tools=["opencravat_execution_tool"],
-                opencravat_result=opencravat_result,
             )
 
     if direct_tool and direct_tool.get("name") == "snpeff_execution_tool":

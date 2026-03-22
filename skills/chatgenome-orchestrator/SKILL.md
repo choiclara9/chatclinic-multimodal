@@ -33,17 +33,16 @@ For the current migration stage, the preferred initial order is:
 2. `annotation_tool`
 3. `roh_analysis_tool`
 4. `snpeff_execution_tool` when the user explicitly requests local SnpEff annotation
-5. `opencravat_execution_tool` when the user explicitly requests local OpenCRAVAT annotation
-6. `cadd_lookup_tool`
-7. `revel_lookup_tool`
-8. `candidate_ranking_tool`
-9. `grounded_summary_tool`
-10. `clinvar_review_tool`
-11. `vep_consequence_tool`
-12. `clinical_coverage_tool`
-13. `filtering_view_tool`
-14. `symbolic_alt_tool`
-15. `ldblockshow_execution_tool` when the user explicitly requests locus-level LD heatmap visualization for a VCF region
+5. `cadd_lookup_tool`
+6. `revel_lookup_tool`
+7. `candidate_ranking_tool`
+8. `grounded_summary_tool`
+9. `clinvar_review_tool`
+10. `vep_consequence_tool`
+11. `clinical_coverage_tool`
+12. `filtering_view_tool`
+13. `symbolic_alt_tool`
+14. `ldblockshow_execution_tool` when the user explicitly requests locus-level LD heatmap visualization for a VCF region
 
 Later tools should include:
 
@@ -55,7 +54,6 @@ Later tools should include:
 - Use `vcf_qc_tool` to establish base facts for any VCF workflow.
 - Use `annotation_tool` to generate transcript-aware annotation state before downstream ranking.
 - Use `snpeff_execution_tool` when the user explicitly asks to run SnpEff on a local VCF and the required local Java runtime, jar, and genome database are available.
-- Use `opencravat_execution_tool` when the user explicitly asks to run OpenCRAVAT on a local VCF and the required `oc` CLI and local modules are available.
 - Use `ldblockshow_execution_tool` when the user explicitly asks for LD heatmap or block visualization over a region and provides or implies a concrete locus in `chr:start:end` format.
 - Use `cadd_lookup_tool` to enrich shortlisted annotated variants with local CADD scores when a build-matched local table is available.
 - Use `revel_lookup_tool` to enrich shortlisted missense variants with local REVEL scores when a matching local segment file is available.

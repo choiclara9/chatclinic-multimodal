@@ -177,7 +177,6 @@ class AnalysisResponse(BaseModel):
     roh_segments: list[RohSegment]
     source_vcf_path: Optional[str] = None
     snpeff_result: Optional[SnpEffResponse] = None
-    opencravat_result: Optional[OpenCravatResponse] = None
     ldblockshow_result: Optional[LDBlockShowResponse] = None
     candidate_variants: list[RankedCandidate] = []
     clinvar_summary: list[CountSummaryItem] = []
@@ -217,7 +216,6 @@ class AnalysisChatResponse(BaseModel):
     citations: list[str]
     used_fallback: bool
     used_tools: list[str] = []
-    opencravat_result: Optional[OpenCravatResponse] = None
     ldblockshow_result: Optional[LDBlockShowResponse] = None
 
 
@@ -342,42 +340,6 @@ class SnpEffResponse(BaseModel):
     index_path: Optional[str]
     command_preview: str
     parsed_records: list[SnpEffAnnotatedRecord]
-
-
-class OpenCravatRequest(BaseModel):
-    vcf_path: str = Field(..., description="Absolute path to the input VCF or VCF.gz")
-    genome: Literal["hg19", "hg38", "hg18"] = Field(default="hg19", description="Reference genome of the input VCF")
-    output_dir: Optional[str] = Field(default=None, description="Optional output directory for OpenCRAVAT results")
-    run_name: Optional[str] = Field(default=None, description="Optional OpenCRAVAT run name")
-    annotators: list[str] = Field(default_factory=list, description="Optional subset of annotators to run")
-    report_types: list[Literal["excel", "tsv", "vcf", "text", "csv"]] = Field(
-        default_factory=lambda: ["text"],
-        description="Reporter types to request from OpenCRAVAT",
-    )
-    preview_limit: int = Field(default=10, description="Maximum number of text report preview lines to include")
-
-
-class OpenCravatPreviewRow(BaseModel):
-    columns: dict[str, str]
-
-
-class OpenCravatResponse(BaseModel):
-    tool: str
-    genome: str
-    input_path: str
-    output_dir: str
-    run_name: str
-    command_preview: str
-    status: Optional[str] = None
-    error_message: Optional[str] = None
-    status_json_path: Optional[str] = None
-    sqlite_path: Optional[str] = None
-    text_report_path: Optional[str] = None
-    variant_table_path: Optional[str] = None
-    excel_report_path: Optional[str] = None
-    vcf_report_path: Optional[str] = None
-    csv_report_path: Optional[str] = None
-    preview_rows: list[OpenCravatPreviewRow] = []
 
 
 class LDBlockShowRequest(BaseModel):

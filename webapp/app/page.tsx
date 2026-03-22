@@ -99,26 +99,6 @@ type AnalysisResponse = {
       }>;
     }>;
   } | null;
-  opencravat_result?: {
-    tool: string;
-    genome: string;
-    input_path: string;
-    output_dir: string;
-    run_name: string;
-    command_preview: string;
-    status?: string | null;
-    error_message?: string | null;
-    status_json_path?: string | null;
-    sqlite_path?: string | null;
-    text_report_path?: string | null;
-    variant_table_path?: string | null;
-    excel_report_path?: string | null;
-    vcf_report_path?: string | null;
-    csv_report_path?: string | null;
-    preview_rows: Array<{
-      columns: Record<string, string>;
-    }>;
-  } | null;
   ldblockshow_result?: {
     tool: string;
     input_path: string;
@@ -246,7 +226,6 @@ type StudioView =
   | "coverage"
   | "rawqc"
   | "snpeff"
-  | "opencravat"
   | "ldblockshow"
   | "symbolic"
   | "roh"
@@ -280,13 +259,6 @@ function isRawQcFileName(fileName: string) {
     lowered.endsWith(".bam") ||
     lowered.endsWith(".sam")
   );
-}
-
-function isExplicitOpenCravatRequest(text: string) {
-  const lowered = text.toLowerCase();
-  const mentions = lowered.includes("opencravat") || lowered.includes("open cravat");
-  const execution = ["run", "execute", "실행", "돌려", "annotate"].some((marker) => lowered.includes(marker));
-  return mentions && execution;
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -1010,61 +982,6 @@ export default function Page() {
       return;
     }
 
-    if (isExplicitOpenCravatRequest(text)) {
-      setStatus("Running OpenCRAVAT...");
-      setAnalysisQa((current) => [...current, { role: "user", content: text }]);
-      try {
-        const genomeGuess = (analysis.facts.genome_build_guess || "").toLowerCase();
-        const genome =
-          genomeGuess.includes("38") || genomeGuess.includes("hg38") || genomeGuess.includes("grch38")
-            ? "hg38"
-            : "hg19";
-        const runName = `${analysis.analysis_id}-opencravat-${Date.now()}`;
-        const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/opencravat/run`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            vcf_path: analysis.source_vcf_path,
-            genome,
-            run_name: runName,
-            report_types: ["text"],
-            preview_limit: 5,
-          }),
-        });
-        if (!response.ok) {
-          throw new Error(await response.text());
-        }
-        const result = await response.json();
-        const answer =
-          `OpenCRAVAT was run on the current VCF using genome \`${result.genome}\`.\n\n` +
-          `- Status: \`${result.status || "unknown"}\`\n` +
-          `- Primary artifact: \`${result.text_report_path || result.variant_table_path || result.sqlite_path || "not available"}\`\n` +
-          `- Preview rows: ${Array.isArray(result.preview_rows) ? result.preview_rows.length : 0}\n\n` +
-          "The Studio card has been updated with the latest OpenCRAVAT result.";
-        setAnalysisQa((current) => [...current, { role: "assistant", content: answer }]);
-        setAnalysis((current) =>
-          current
-            ? {
-                ...current,
-                opencravat_result: result,
-                used_tools: ["opencravat_execution_tool"],
-              }
-            : current,
-        );
-        setActiveStudioView("opencravat");
-        setFollowUpAnswer(answer);
-        setStatus("Answer ready");
-      } catch (caught) {
-        const msg = caught instanceof Error ? caught.message : String(caught);
-        setAnalysisQa((current) => [
-          ...current,
-          { role: "assistant", content: `OpenCRAVAT 실행 중 오류가 발생했습니다: ${msg}` },
-        ]);
-        setStatus("Answer failed");
-      }
-      return;
-    }
-
     setStatus("Generating answer...");
     setAnalysisQa((current) => [...current, { role: "user", content: text }]);
 
@@ -1095,18 +1012,6 @@ export default function Page() {
             : current,
         );
         setActiveStudioView("ldblockshow");
-      }
-      if (payload.opencravat_result) {
-        setAnalysis((current) =>
-          current
-            ? {
-                ...current,
-                opencravat_result: payload.opencravat_result,
-                used_tools: payload.used_tools ?? ["opencravat_execution_tool"],
-              }
-            : current,
-        );
-        setActiveStudioView("opencravat");
       }
       setFollowUpAnswer(payload.answer);
       setStatus("Answer ready");
@@ -1479,7 +1384,6 @@ export default function Page() {
         { id: "qc", title: "QC Summary", subtitle: "PASS, Ti/Tv, GT quality" },
         { id: "coverage", title: "Clinical Coverage", subtitle: "Annotation completeness view" },
         { id: "snpeff", title: "SnpEff Review", subtitle: "Local effect annotation preview" },
-        { id: "opencravat", title: "OpenCRAVAT Review", subtitle: "Local composite annotation preview" },
         ...(analysis?.ldblockshow_result
           ? [{ id: "ldblockshow" as StudioView, title: "LD Block Review", subtitle: "Locus-level LD heatmap" }]
           : []),
@@ -1567,14 +1471,6 @@ export default function Page() {
                 hgvs_p: ann.hgvs_p,
               })),
             })),
-          }
-        : null,
-      opencravat_preview: analysis?.opencravat_result
-        ? {
-            genome: analysis.opencravat_result.genome,
-            status: analysis.opencravat_result.status,
-            error_message: analysis.opencravat_result.error_message,
-            preview_rows: analysis.opencravat_result.preview_rows.slice(0, 5).map((row) => row.columns),
           }
         : null,
       ldblockshow_preview: analysis?.ldblockshow_result
@@ -2150,84 +2046,6 @@ export default function Page() {
                   </>
                 ) : (
                   <p className="emptyState">No auxiliary SnpEff result is available for the current analysis.</p>
-                )}
-              </div>
-            </section>
-          ) : null}
-
-          {analysis && activeStudioView === "opencravat" ? (
-            <section className="notebookPanel studioCanvasPanel">
-              <div className="notebookHeader">
-                <h2>OpenCRAVAT Review</h2>
-              </div>
-              <div className="studioCanvasBody">
-                {analysis.opencravat_result ? (
-                  <>
-                    <div className="resultMetricGrid">
-                      <MetricTile label="Genome" value={analysis.opencravat_result.genome} tone="good" />
-                      <MetricTile label="Status" value={analysis.opencravat_result.status ?? "unknown"} tone="neutral" />
-                      <MetricTile
-                        label="Preview rows"
-                        value={String(analysis.opencravat_result.preview_rows.length)}
-                        tone="neutral"
-                      />
-                    </div>
-                    {analysis.opencravat_result.error_message ? (
-                      <p className="reportNotice">
-                        <strong>OpenCRAVAT note:</strong> {analysis.opencravat_result.error_message}
-                      </p>
-                    ) : null}
-                    <div className="resultList">
-                      {analysis.opencravat_result.preview_rows.length ? (
-                        analysis.opencravat_result.preview_rows.map((row, index) => (
-                          <article key={`opencravat-row-${index}`} className="resultListItem resultListStatic">
-                            <strong>
-                              {(row.columns["Chrom"] || row.columns["chrom"] || ".")}:
-                              {(row.columns["Position"] || row.columns["pos"] || ".")}{" "}
-                              {(row.columns["Ref Base"] || row.columns["ref_base"] || ".")}&gt;
-                              {(row.columns["Alt Base"] || row.columns["alt_base"] || ".")}
-                            </strong>
-                            <span>
-                              {Object.entries(row.columns)
-                                .slice(0, 6)
-                                .map(([key, value]) => `${key}=${value}`)
-                                .join(" | ")}
-                            </span>
-                          </article>
-                        ))
-                      ) : (
-                        <p className="emptyState">No OpenCRAVAT preview rows are available.</p>
-                      )}
-                    </div>
-                    <div className="resultActionRow">
-                      {analysis.opencravat_result.variant_table_path ? (
-                        <a
-                          className="sourceAddButton"
-                          href={`${apiBase.replace(/\/$/, "")}/api/v1/files?path=${encodeURIComponent(
-                            analysis.opencravat_result.variant_table_path,
-                          )}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open variant table
-                        </a>
-                      ) : null}
-                      {analysis.opencravat_result.status_json_path ? (
-                        <a
-                          className="sourceAddButton"
-                          href={`${apiBase.replace(/\/$/, "")}/api/v1/files?path=${encodeURIComponent(
-                            analysis.opencravat_result.status_json_path,
-                          )}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          Open status JSON
-                        </a>
-                      ) : null}
-                    </div>
-                  </>
-                ) : (
-                  <p className="emptyState">No OpenCRAVAT result is available for the current analysis.</p>
                 )}
               </div>
             </section>

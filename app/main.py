@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import os
-import json
-import subprocess
-import sys
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -21,8 +17,6 @@ from app.models import (
     AnalysisResponse,
     LDBlockShowRequest,
     LDBlockShowResponse,
-    OpenCravatRequest,
-    OpenCravatResponse,
     CountSummaryItem,
     DetailedCountSummaryItem,
     CmplotAssociationRequest,
@@ -52,7 +46,6 @@ from app.services.fastqc import FASTQC_OUTPUT_DIR
 from app.services.filtering import run_filter
 from app.services.jobs import create_job, get_job, run_job
 from app.services.ldblockshow import LDBLOCKSHOW_OUTPUT_DIR, run_ldblockshow
-from app.services.opencravat import OPENCRAVAT_OUTPUT_DIR, run_opencravat
 from app.services.recommendation import build_recommendations
 from app.services.references import build_reference_bundle
 from app.services.r_vcf_plots import RPLOT_OUTPUT_DIR, run_cmplot_association, run_r_vcf_plots
@@ -112,13 +105,6 @@ def _snpeff_genome_from_build(genome_build_guess: str | None) -> str:
     return "GRCh37.75"
 
 
-def _opencravat_genome_from_build(genome_build_guess: str | None) -> str:
-    value = (genome_build_guess or "").lower()
-    if any(token in value for token in ("38", "hg38", "grch38")):
-        return "hg38"
-    return "hg19"
-
-
 def _analyze_vcf(
     path: str,
     annotation_scope: str = "representative",
@@ -175,7 +161,6 @@ def _analyze_vcf(
         used_tools.append("snpeff_execution_tool")
     except Exception:
         snpeff_result = None
-    opencravat_result: OpenCravatResponse | None = None
     try:
         roh_result = run_tool("roh_analysis_tool", {"vcf_path": path})
         roh_segments = [RohSegment(**item) for item in roh_result["roh_segments"]]
@@ -355,7 +340,6 @@ def _analyze_vcf(
         roh_segments=roh_segments,
         source_vcf_path=path,
         snpeff_result=snpeff_result,
-        opencravat_result=opencravat_result,
         candidate_variants=candidate_variants,
         clinvar_summary=clinvar_summary,
         consequence_summary=consequence_summary,
@@ -418,7 +402,6 @@ def get_output_file(path: str = Query(..., description="Absolute path to a gener
     allowed_roots = [
         RPLOT_OUTPUT_DIR.resolve(),
         FASTQC_OUTPUT_DIR.resolve(),
-        OPENCRAVAT_OUTPUT_DIR.resolve(),
         LDBLOCKSHOW_OUTPUT_DIR.resolve(),
     ]
     if not any(root == file_path or root in file_path.parents for root in allowed_roots):
@@ -510,45 +493,6 @@ def run_snpeff_annotation(request: SnpEffRequest) -> SnpEffResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"SnpEff failed: {exc}") from exc
-
-
-@app.post("/api/v1/opencravat/run", response_model=OpenCravatResponse)
-def run_opencravat_annotation(request: OpenCravatRequest) -> OpenCravatResponse:
-    try:
-        plugin_run = PLUGINS_DIR / "opencravat_execution_tool" / "run.py"
-        with tempfile.TemporaryDirectory() as tmpdir:
-            input_path = Path(tmpdir) / "opencravat_input.json"
-            output_path = Path(tmpdir) / "opencravat_output.json"
-            input_path.write_text(json.dumps(request.model_dump()), encoding="utf-8")
-            completed = subprocess.run(
-                [
-                    sys.executable,
-                    str(plugin_run),
-                    "--input",
-                    str(input_path),
-                    "--output",
-                    str(output_path),
-                ],
-                cwd=str(ROOT_DIR),
-                env={
-                    **os.environ,
-                    "PYTHONPATH": str(ROOT_DIR),
-                },
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if completed.returncode != 0:
-                raw_message = completed.stderr.strip() or completed.stdout.strip() or "Unknown OpenCRAVAT failure"
-                lines = [line.strip() for line in raw_message.splitlines() if line.strip()]
-                message = lines[-1] if lines else raw_message
-                raise RuntimeError(message)
-            payload = json.loads(output_path.read_text(encoding="utf-8"))
-            return OpenCravatResponse(**payload)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"OpenCRAVAT failed: {exc}") from exc
 
 
 @app.post("/api/v1/ldblockshow/run", response_model=LDBlockShowResponse)
