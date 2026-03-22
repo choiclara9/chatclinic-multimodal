@@ -1,0 +1,31 @@
+{
+  "name": "gatk_liftover_vcf_tool",
+  "description": "Run GATK LiftoverVcf on a local VCF.",
+  "task": "vcf-liftover",
+  "modality": "genomics",
+  "approval_required": false,
+  "source": "plugin",
+  "routing": {
+    "trigger_keywords": ["liftover", "lift over", "hg19", "hg38", "grch37", "grch38"],
+    "execution_intents": ["run", "execute", "convert", "liftover", "실행", "변환", "옮겨"],
+    "requires_source_vcf": true,
+    "question_argument": "target_build",
+    "result_slot": "liftover_result",
+    "execution_mode": "direct"
+  },
+  "orchestration": {
+    "tool_kind": "execution",
+    "default_stage": "pre-annotation",
+    "depends_on": [],
+    "consumes": ["vcf_path"],
+    "produces": ["liftover_result"],
+    "priority": 82,
+    "on_demand": true
+  },
+  "runtime": {
+    "host_compatible": ["cpu"],
+    "requires_gpu": false,
+    "allow_cpu_fallback": true,
+    "estimated_runtime_sec": 20
+  }
+}

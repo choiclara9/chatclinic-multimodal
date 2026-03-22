@@ -1,0 +1,31 @@
+{
+  "name": "plink_execution_tool",
+  "description": "Run local PLINK 2 QC commands on a VCF.",
+  "task": "variant-qc",
+  "modality": "genomics",
+  "approval_required": false,
+  "source": "plugin",
+  "routing": {
+    "trigger_keywords": ["plink", "plink2"],
+    "execution_intents": ["run", "execute", "qc", "실행", "돌려"],
+    "requires_source_vcf": true,
+    "question_argument": "none",
+    "result_slot": "plink_result",
+    "execution_mode": "direct"
+  },
+  "orchestration": {
+    "tool_kind": "execution",
+    "default_stage": "post-annotation",
+    "depends_on": ["annotation_tool"],
+    "consumes": ["vcf_path"],
+    "produces": ["plink_result"],
+    "priority": 80,
+    "on_demand": true
+  },
+  "runtime": {
+    "host_compatible": ["cpu"],
+    "requires_gpu": false,
+    "allow_cpu_fallback": true,
+    "estimated_runtime_sec": 10
+  }
+}
