@@ -152,12 +152,31 @@ def _render_tool_help(manifest: dict[str, object]) -> str:
             f"`{name}` is registered, but no curated help metadata is available yet.\n\n"
             f"- Try one of these aliases: {aliases or '@tool'}"
         )
-    lines: list[str] = []
+    orchestration = manifest.get("orchestration") if isinstance(manifest.get("orchestration"), dict) else {}
+    consumes = orchestration.get("consumes") if isinstance(orchestration, dict) else []
+    input_hint = "active source"
+    if isinstance(consumes, list):
+        lowered = [str(item).lower() for item in consumes]
+        if "vcf_path" in lowered:
+            input_hint = "active VCF source"
+        elif "alignment_file" in lowered:
+            input_hint = "active BAM/SAM/CRAM source"
+        elif "summary_stats_path" in lowered:
+            input_hint = "active summary-statistics source"
+
+    alias_list = [f"@{item}" for item in _tool_aliases(manifest)[:4]]
+    primary_alias = alias_list[0] if alias_list else "@tool"
+    lines: list[str] = [f"**{primary_alias}**", ""]
     summary = str(help_block.get("summary") or "").strip()
     if summary:
-        lines.append(f"**{name}**")
-        lines.append("")
         lines.append(summary)
+    else:
+        lines.append(f"`{name}` is available in this build.")
+    lines.append("")
+    lines.append("Quick use")
+    lines.append(f"- Run on: {input_hint}")
+    lines.append(f"- Start with: `{primary_alias}`")
+    lines.append(f"- Help: `{primary_alias} help`")
     modes = help_block.get("modes") or []
     if isinstance(modes, list) and modes:
         lines.append("")
@@ -197,10 +216,9 @@ def _render_tool_help(manifest: dict[str, object]) -> str:
         lines.append("Notes")
         for note in notes:
             lines.append(f"- {note}")
-    aliases = ", ".join(f"@{item}" for item in _tool_aliases(manifest)[:4])
-    if aliases:
+    if alias_list:
         lines.append("")
-        lines.append(f"Aliases: {aliases}")
+        lines.append(f"Aliases: {', '.join(alias_list)}")
     return "\n".join(lines).strip()
 
 
