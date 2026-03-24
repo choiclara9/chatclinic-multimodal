@@ -211,16 +211,23 @@ def _parse_skill_request(question: str) -> dict[str, object] | None:
     remainder = (match.group(1) or "").strip()
     lowered = remainder.lower()
     if not remainder or lowered in {"help", "--help", "-h"}:
-        return {"name": None, "remainder": remainder, "is_help": True, "manifest": None}
-    workflow_name = remainder.split()[0].strip()
+        return {
+            "name": None,
+            "input_name": None,
+            "manifest": None,
+            "remainder": remainder,
+            "is_help": True,
+        }
+    input_name = remainder.split()[0].strip()
     is_help = remainder.lower().endswith(" help")
-    target_name = workflow_name
-    manifest = load_workflow_manifest(workflow_name)
+    manifest = load_workflow_manifest(input_name)
+    canonical_name = str(manifest.get("name") or input_name) if isinstance(manifest, dict) else input_name
     return {
-        "name": target_name,
+        "name": canonical_name,
+        "input_name": input_name,
+        "manifest": manifest,
         "remainder": remainder,
         "is_help": is_help,
-        "manifest": manifest,
     }
 
 
@@ -518,6 +525,17 @@ def _render_skill_help(source_type: str | None = None, selected: dict[str, objec
         lines.append("- `@skill help`")
         lines.append("- `@skill representative_vcf_review`")
     return "\n".join(lines)
+
+
+def _resolve_skill_help_response(
+    skill_request: dict[str, object] | None, source_type: str
+) -> str | None:
+    if not skill_request or not bool(skill_request.get("is_help")):
+        return None
+    manifest = skill_request.get("manifest")
+    if isinstance(manifest, dict):
+        return _render_skill_help(source_type, selected=manifest)
+    return _render_skill_help(source_type)
 
 
 def _is_korean(text: str) -> bool:
@@ -900,8 +918,9 @@ def _handle_analysis_at_tool_request(payload: AnalysisChatRequest, tool_request:
 
 def _handle_analysis_skill_request(payload: AnalysisChatRequest, skill_request: dict[str, object]) -> AnalysisChatResponse:
     manifest = skill_request.get("manifest")
-    if skill_request.get("is_help") and manifest is None:
-        return AnalysisChatResponse(answer=_render_skill_help("vcf"), citations=[], used_fallback=False)
+    help_text = _resolve_skill_help_response(skill_request, "vcf")
+    if help_text is not None:
+        return AnalysisChatResponse(answer=help_text, citations=[], used_fallback=False)
     if manifest is None:
         name = str(skill_request.get("name") or "workflow")
         return AnalysisChatResponse(
@@ -909,8 +928,6 @@ def _handle_analysis_skill_request(payload: AnalysisChatRequest, skill_request: 
             citations=[],
             used_fallback=False,
         )
-    if skill_request.get("is_help"):
-        return AnalysisChatResponse(answer=_render_skill_help("vcf", selected=manifest), citations=[], used_fallback=False)
     workflow_name = str(manifest.get("name") or "")
     if workflow_name == "representative_vcf_review":
         source_vcf_path = payload.analysis.source_vcf_path
@@ -1009,8 +1026,9 @@ def _handle_raw_qc_at_tool_request(payload: RawQcChatRequest, tool_request: dict
 
 def _handle_raw_qc_skill_request(payload: RawQcChatRequest, skill_request: dict[str, object]) -> RawQcChatResponse:
     manifest = skill_request.get("manifest")
-    if skill_request.get("is_help") and manifest is None:
-        return RawQcChatResponse(answer=_render_skill_help("raw_qc"), citations=[], used_fallback=False)
+    help_text = _resolve_skill_help_response(skill_request, "raw_qc")
+    if help_text is not None:
+        return RawQcChatResponse(answer=help_text, citations=[], used_fallback=False)
     if manifest is None:
         name = str(skill_request.get("name") or "workflow")
         return RawQcChatResponse(
@@ -1018,8 +1036,6 @@ def _handle_raw_qc_skill_request(payload: RawQcChatRequest, skill_request: dict[
             citations=[],
             used_fallback=False,
         )
-    if skill_request.get("is_help"):
-        return RawQcChatResponse(answer=_render_skill_help("raw_qc", selected=manifest), citations=[], used_fallback=False)
     workflow_name = str(manifest.get("name") or "")
     if workflow_name == "raw_qc_review":
         source_raw_path = payload.analysis.source_raw_path
@@ -1448,18 +1464,13 @@ def answer_summary_stats_chat(payload: SummaryStatsChatRequest) -> SummaryStatsC
     if skill_request:
         try:
             manifest = skill_request.get("manifest")
-            if skill_request.get("is_help") and manifest is None:
-                return SummaryStatsChatResponse(answer=_render_skill_help("summary_stats"), citations=[], used_fallback=False)
+            help_text = _resolve_skill_help_response(skill_request, "summary_stats")
+            if help_text is not None:
+                return SummaryStatsChatResponse(answer=help_text, citations=[], used_fallback=False)
             if manifest is None:
                 name = str(skill_request.get("name") or "workflow")
                 return SummaryStatsChatResponse(
                     answer=f"`@skill {name}` is not a registered workflow for the current build.",
-                    citations=[],
-                    used_fallback=False,
-                )
-            if skill_request.get("is_help"):
-                return SummaryStatsChatResponse(
-                    answer=_render_skill_help("summary_stats", selected=manifest),
                     citations=[],
                     used_fallback=False,
                 )
