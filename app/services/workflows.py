@@ -412,3 +412,48 @@ def analyze_prs_prep_workflow(
     result = analyze_prs_prep(path, original_name, genome_build=genome_build)
     result.analysis_id = str(uuid.uuid4())
     return result
+
+
+def run_registered_summary_stats_workflow(
+    workflow_name: str,
+    analysis: SummaryStatsResponse,
+) -> dict[str, object]:
+    manifest = load_workflow_manifest(workflow_name)
+    if manifest is None:
+        raise ValueError(f"Unknown summary-statistics workflow: {workflow_name}")
+    source_type = str(manifest.get("source_type") or "").strip().lower()
+    if source_type != "summary_stats":
+        raise ValueError(f"Workflow {workflow_name} is not registered for summary-statistics sources.")
+
+    requires = [str(item).strip() for item in manifest.get("requires", []) if str(item).strip()]
+    if "source_stats_path" in requires and not analysis.source_stats_path:
+        raise RuntimeError(
+            "The active summary-statistics session does not expose a durable source file path, so this workflow cannot be rerun from chat."
+        )
+
+    if workflow_name == "prs_prep":
+        prs_prep_result = analyze_prs_prep_workflow(
+            analysis.source_stats_path or "",
+            analysis.file_name,
+            genome_build=analysis.genome_build,
+        )
+        refreshed = analysis.model_copy(update={"prs_prep_result": prs_prep_result})
+        requested_view = str(manifest.get("requested_view") or "prs_prep")
+        answer = (
+            "The prs_prep workflow was run on the active summary-statistics source.\n\n"
+            f"- Workflow: `{workflow_name}`\n"
+            f"- Active file: `{prs_prep_result.file_name}`\n"
+            f"- Build check: {prs_prep_result.build_check.inferred_build} ({prs_prep_result.build_check.build_confidence})\n"
+            f"- Score-file rows kept: {prs_prep_result.kept_rows}\n"
+            f"- Score-file rows dropped: {prs_prep_result.dropped_rows}\n"
+            f"- Score file ready: {'yes' if prs_prep_result.score_file_ready else 'no'}\n\n"
+            "The PRS Prep Review state has been added to Studio. Use `$studio ...` to ask grounded questions about build check, harmonization, or score-file readiness."
+        )
+        return {
+            "answer": answer,
+            "analysis": refreshed,
+            "requested_view": requested_view,
+            "prs_prep_result": prs_prep_result,
+        }
+
+    raise NotImplementedError(f"Workflow {workflow_name} is registered but not yet executable in the generic summary-statistics runner.")

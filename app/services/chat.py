@@ -42,6 +42,7 @@ from app.services.workflows import (
     analyze_vcf_workflow,
     list_workflow_manifests,
     load_workflow_manifest,
+    run_registered_summary_stats_workflow,
 )
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -1504,35 +1505,17 @@ def answer_summary_stats_chat(payload: SummaryStatsChatRequest) -> SummaryStatsC
                     analysis=refreshed,
                 )
             if workflow_name == "prs_prep":
-                source_stats_path = payload.analysis.source_stats_path
-                if not source_stats_path:
-                    return SummaryStatsChatResponse(
-                        answer="The active summary-statistics session does not expose a durable source file path, so PRS preparation cannot be run from chat.",
-                        citations=[],
-                        used_fallback=False,
-                    )
-                prs_prep_result = analyze_prs_prep_workflow(
-                    source_stats_path,
-                    payload.analysis.file_name,
-                    genome_build=payload.analysis.genome_build,
+                workflow_result = run_registered_summary_stats_workflow(
+                    workflow_name,
+                    payload.analysis,
                 )
-                refreshed = payload.analysis.model_copy(update={"prs_prep_result": prs_prep_result})
                 return SummaryStatsChatResponse(
-                    answer=(
-                        "The prs_prep workflow was run on the active summary-statistics source.\n\n"
-                        f"- Workflow: `{workflow_name}`\n"
-                        f"- Active file: `{prs_prep_result.file_name}`\n"
-                        f"- Build check: {prs_prep_result.build_check.inferred_build} ({prs_prep_result.build_check.build_confidence})\n"
-                        f"- Score-file rows kept: {prs_prep_result.kept_rows}\n"
-                        f"- Score-file rows dropped: {prs_prep_result.dropped_rows}\n"
-                        f"- Score file ready: {'yes' if prs_prep_result.score_file_ready else 'no'}\n\n"
-                        "The PRS Prep Review state has been added to Studio. Use `$studio ...` to ask grounded questions about build check, harmonization, or score-file readiness."
-                    ),
+                    answer=str(workflow_result["answer"]),
                     citations=[],
                     used_fallback=False,
-                    requested_view="prs_prep",
-                    analysis=refreshed,
-                    prs_prep_result=prs_prep_result,
+                    requested_view=str(workflow_result.get("requested_view") or "prs_prep"),
+                    analysis=workflow_result.get("analysis"),
+                    prs_prep_result=workflow_result.get("prs_prep_result"),
                 )
             return SummaryStatsChatResponse(
                 answer=f"`@skill {workflow_name}` is registered but not yet executable in summary-statistics chat.",
