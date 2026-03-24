@@ -6,6 +6,7 @@ import re
 import urllib.request
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 from app.models import (
     AnalysisChatRequest,
@@ -46,6 +47,57 @@ PLUGINS_DIR = ROOT_DIR / "plugins"
 WORKFLOWS_DIR = ROOT_DIR / "skills" / "chatgenome-orchestrator" / "workflows"
 OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
 
+TOOL_ALIAS_REGISTRY: dict[str, dict[str, Any]] = {
+    "liftover": {
+        "plugin_name": "gatk_liftover_vcf_tool",
+        "aliases": ["liftover"],
+        "source_types": ["vcf"],
+        "result_kind": "liftover_result",
+        "help_supported": True,
+        "direct_preanalysis_supported": True,
+    },
+    "samtools": {
+        "plugin_name": "samtools_execution_tool",
+        "aliases": ["samtools"],
+        "source_types": ["raw_qc"],
+        "result_kind": "samtools_result",
+        "help_supported": True,
+        "direct_preanalysis_supported": True,
+    },
+    "plink": {
+        "plugin_name": "plink_execution_tool",
+        "aliases": ["plink"],
+        "source_types": ["vcf"],
+        "result_kind": "plink_result",
+        "help_supported": True,
+        "direct_preanalysis_supported": True,
+    },
+    "snpeff": {
+        "plugin_name": "snpeff_execution_tool",
+        "aliases": ["snpeff"],
+        "source_types": ["vcf"],
+        "result_kind": "snpeff_result",
+        "help_supported": True,
+        "direct_preanalysis_supported": True,
+    },
+    "ldblockshow": {
+        "plugin_name": "ldblockshow_execution_tool",
+        "aliases": ["ldblockshow"],
+        "source_types": ["vcf"],
+        "result_kind": "ldblockshow_result",
+        "help_supported": True,
+        "direct_preanalysis_supported": True,
+    },
+    "qqman": {
+        "plugin_name": "qqman_execution_tool",
+        "aliases": ["qqman"],
+        "source_types": ["summary_stats"],
+        "result_kind": "qqman_result",
+        "help_supported": True,
+        "direct_preanalysis_supported": True,
+    },
+}
+
 
 @lru_cache(maxsize=1)
 def _load_tool_manifests() -> list[dict[str, object]]:
@@ -71,6 +123,33 @@ def _load_workflow_manifests() -> list[dict[str, object]]:
         if isinstance(payload, dict):
             manifests.append(payload)
     return manifests
+
+
+def _tool_registry_entry_for_manifest(manifest: dict[str, object]) -> dict[str, Any] | None:
+    plugin_name = str(manifest.get("name") or "").strip()
+    for entry in TOOL_ALIAS_REGISTRY.values():
+        if str(entry.get("plugin_name") or "").strip() == plugin_name:
+            return entry
+    return None
+
+
+def _tool_registry_entry_for_alias(alias: str) -> tuple[str | None, dict[str, Any] | None]:
+    lowered = alias.strip().lower()
+    for canonical_alias, entry in TOOL_ALIAS_REGISTRY.items():
+        aliases = [str(item).strip().lower() for item in entry.get("aliases", [])]
+        if lowered in aliases:
+            return canonical_alias, entry
+    return None, None
+
+
+def _manifest_for_plugin_name(plugin_name: str | None) -> dict[str, object] | None:
+    if not plugin_name:
+        return None
+    normalized = str(plugin_name).strip()
+    for manifest in _load_tool_manifests():
+        if str(manifest.get("name") or "").strip() == normalized:
+            return manifest
+    return None
 
 
 def _tool_aliases(manifest: dict[str, object]) -> list[str]:
@@ -99,22 +178,38 @@ def _parse_at_tool_request(question: str) -> dict[str, object] | None:
     match = re.match(r"^@([A-Za-z0-9_-]+)(?:\s+(.*))?$", stripped, flags=re.DOTALL)
     if not match:
         return None
-    alias = match.group(1).strip().lower()
-    if alias == "skill":
+    raw_alias = match.group(1).strip().lower()
+    if raw_alias == "skill":
         return None
     remainder = (match.group(2) or "").strip()
+    lowered = remainder.lower()
+    canonical_alias, registry_entry = _tool_registry_entry_for_alias(raw_alias)
+    if registry_entry is not None:
+        manifest = _manifest_for_plugin_name(registry_entry.get("plugin_name"))
+        return {
+            "manifest": manifest,
+            "alias": canonical_alias or raw_alias,
+            "input_alias": raw_alias,
+            "registry_entry": registry_entry,
+            "remainder": remainder,
+            "is_help": lowered in {"help", "--help", "-h"} or lowered.startswith("help "),
+        }
+
     for manifest in _load_tool_manifests():
-        if alias in _tool_aliases(manifest):
-            lowered = remainder.lower()
+        if raw_alias in _tool_aliases(manifest):
             return {
                 "manifest": manifest,
-                "alias": alias,
+                "alias": raw_alias,
+                "input_alias": raw_alias,
+                "registry_entry": _tool_registry_entry_for_manifest(manifest),
                 "remainder": remainder,
                 "is_help": lowered in {"help", "--help", "-h"} or lowered.startswith("help "),
             }
     return {
         "manifest": None,
-        "alias": alias,
+        "alias": raw_alias,
+        "input_alias": raw_alias,
+        "registry_entry": None,
         "remainder": remainder,
         "is_help": False,
     }
@@ -150,6 +245,7 @@ def _parse_skill_request(question: str) -> dict[str, object] | None:
 
 def _render_tool_help(manifest: dict[str, object]) -> str:
     name = str(manifest.get("name") or "tool")
+    registry_entry = _tool_registry_entry_for_manifest(manifest)
     help_block = manifest.get("help")
     if not isinstance(help_block, dict):
         aliases = ", ".join(f"@{item}" for item in _tool_aliases(manifest)[:4])
@@ -157,19 +253,33 @@ def _render_tool_help(manifest: dict[str, object]) -> str:
             f"`{name}` is registered, but no curated help metadata is available yet.\n\n"
             f"- Try one of these aliases: {aliases or '@tool'}"
         )
-    orchestration = manifest.get("orchestration") if isinstance(manifest.get("orchestration"), dict) else {}
-    consumes = orchestration.get("consumes") if isinstance(orchestration, dict) else []
     input_hint = "active source"
-    if isinstance(consumes, list):
-        lowered = [str(item).lower() for item in consumes]
-        if "vcf_path" in lowered:
+    if registry_entry:
+        source_types = [str(item).lower() for item in registry_entry.get("source_types", [])]
+        if "vcf" in source_types:
             input_hint = "active VCF source"
-        elif "alignment_file" in lowered:
+        elif "raw_qc" in source_types:
             input_hint = "active BAM/SAM/CRAM source"
-        elif "summary_stats_path" in lowered:
+        elif "summary_stats" in source_types:
             input_hint = "active summary-statistics source"
+    else:
+        orchestration = manifest.get("orchestration") if isinstance(manifest.get("orchestration"), dict) else {}
+        consumes = orchestration.get("consumes") if isinstance(orchestration, dict) else []
+        if isinstance(consumes, list):
+            lowered = [str(item).lower() for item in consumes]
+            if "vcf_path" in lowered:
+                input_hint = "active VCF source"
+            elif "alignment_file" in lowered:
+                input_hint = "active BAM/SAM/CRAM source"
+            elif "summary_stats_path" in lowered:
+                input_hint = "active summary-statistics source"
 
-    alias_list = [f"@{item}" for item in _tool_aliases(manifest)[:4]]
+    alias_candidates = (
+        [str(item).strip() for item in registry_entry.get("aliases", []) if str(item).strip()]
+        if registry_entry
+        else _tool_aliases(manifest)[:4]
+    )
+    alias_list = [f"@{item}" for item in alias_candidates[:4]]
     primary_alias = alias_list[0] if alias_list else "@tool"
     lines: list[str] = [f"**{primary_alias}**", ""]
     summary = str(help_block.get("summary") or "").strip()
@@ -225,6 +335,70 @@ def _render_tool_help(manifest: dict[str, object]) -> str:
         lines.append("")
         lines.append(f"Aliases: {', '.join(alias_list)}")
     return "\n".join(lines).strip()
+
+
+def _resolve_tool_help_response(tool_request: dict[str, object] | None) -> str | None:
+    if not tool_request or not bool(tool_request.get("is_help")):
+        return None
+    manifest = tool_request.get("manifest")
+    alias = str(tool_request.get("alias") or tool_request.get("input_alias") or "tool").strip()
+    if isinstance(manifest, dict):
+        return _render_tool_help(manifest)
+    return f"`@{alias}` is not a registered ChatGenome tool."
+
+
+def _describe_source_type(source_type: str) -> str:
+    normalized = source_type.strip().lower()
+    if normalized == "vcf":
+        return "VCF session"
+    if normalized == "raw_qc":
+        return "raw-QC/alignment session"
+    if normalized == "summary_stats":
+        return "summary-statistics session"
+    return "current session"
+
+
+def _tool_input_hint(source_type: str) -> str:
+    normalized = source_type.strip().lower()
+    if normalized == "vcf":
+        return "active VCF source"
+    if normalized == "raw_qc":
+        return "active BAM/SAM/CRAM source"
+    if normalized == "summary_stats":
+        return "active summary-statistics source"
+    return "active source"
+
+
+def _resolve_tool_source_mismatch_response(
+    tool_request: dict[str, object] | None, current_source_type: str
+) -> str | None:
+    if not tool_request:
+        return None
+    alias = str(tool_request.get("alias") or tool_request.get("input_alias") or "tool").strip()
+    registry_entry = tool_request.get("registry_entry")
+    if not isinstance(registry_entry, dict):
+        manifest = tool_request.get("manifest")
+        if isinstance(manifest, dict):
+            registry_entry = _tool_registry_entry_for_manifest(manifest)
+    allowed_source_types = [
+        str(item).strip().lower()
+        for item in (registry_entry.get("source_types", []) if isinstance(registry_entry, dict) else [])
+        if str(item).strip()
+    ]
+    current = current_source_type.strip().lower()
+    if not allowed_source_types or current in allowed_source_types:
+        return None
+    if len(allowed_source_types) == 1:
+        target_source_type = allowed_source_types[0]
+        return (
+            f"`@{alias}` uses the {_tool_input_hint(target_source_type)}. "
+            f"Run it from a {_describe_source_type(target_source_type)} rather than a {_describe_source_type(current)}."
+        )
+    expected = ", ".join(_describe_source_type(item) for item in allowed_source_types)
+    return (
+        f"`@{alias}` is not available for the current source type. "
+        f"It expects one of: {expected}."
+    )
 
 
 def _render_skill_help(source_type: str | None = None, selected: dict[str, object] | None = None) -> str:
@@ -614,14 +788,18 @@ def _handle_analysis_at_tool_request(payload: AnalysisChatRequest, tool_request:
     manifest = tool_request.get("manifest")
     alias = str(tool_request.get("alias") or "")
     remainder = str(tool_request.get("remainder") or "")
+    help_text = _resolve_tool_help_response(tool_request)
+    if help_text is not None:
+        return AnalysisChatResponse(answer=help_text, citations=[], used_fallback=False)
+    mismatch_text = _resolve_tool_source_mismatch_response(tool_request, "vcf")
+    if mismatch_text is not None:
+        return AnalysisChatResponse(answer=mismatch_text, citations=[], used_fallback=False)
     if manifest is None:
         return AnalysisChatResponse(
             answer=f"`@{alias}` is not a registered ChatGenome tool.",
             citations=[],
             used_fallback=False,
         )
-    if bool(tool_request.get("is_help")):
-        return AnalysisChatResponse(answer=_render_tool_help(manifest), citations=[], used_fallback=False)
     name = str(manifest.get("name") or "")
     if name == "gatk_liftover_vcf_tool":
         return _handle_liftover_request(payload, remainder=remainder)
@@ -631,18 +809,6 @@ def _handle_analysis_at_tool_request(payload: AnalysisChatRequest, tool_request:
         return _handle_snpeff_request(payload)
     if name == "ldblockshow_execution_tool":
         return _handle_ldblockshow_request(payload)
-    if name == "samtools_execution_tool":
-        return AnalysisChatResponse(
-            answer="`@samtools` uses the active BAM/SAM/CRAM source. Run it from a raw-QC/alignment session rather than a VCF session.",
-            citations=[],
-            used_fallback=False,
-        )
-    if name == "qqman_execution_tool":
-        return AnalysisChatResponse(
-            answer="`@qqman` uses the active summary-statistics source. Run it from a summary-statistics session rather than a VCF session.",
-            citations=[],
-            used_fallback=False,
-        )
     return None
 
 
@@ -692,21 +858,21 @@ def _handle_analysis_skill_request(payload: AnalysisChatRequest, skill_request: 
 def _handle_raw_qc_at_tool_request(payload: RawQcChatRequest, tool_request: dict[str, object]) -> RawQcChatResponse:
     manifest = tool_request.get("manifest")
     alias = str(tool_request.get("alias") or "")
+    help_text = _resolve_tool_help_response(tool_request)
+    if help_text is not None:
+        return RawQcChatResponse(answer=help_text, citations=[], used_fallback=False)
+    mismatch_text = _resolve_tool_source_mismatch_response(tool_request, "raw_qc")
+    if mismatch_text is not None:
+        return RawQcChatResponse(answer=mismatch_text, citations=[], used_fallback=False)
     if manifest is None:
         return RawQcChatResponse(
             answer=f"`@{alias}` is not a registered ChatGenome tool.",
             citations=[],
             used_fallback=False,
         )
-    if bool(tool_request.get("is_help")):
-        return RawQcChatResponse(answer=_render_tool_help(manifest), citations=[], used_fallback=False)
     name = str(manifest.get("name") or "")
     if name != "samtools_execution_tool":
-        return RawQcChatResponse(
-            answer=f"`@{alias}` is not available for the current raw-QC source type.",
-            citations=[],
-            used_fallback=False,
-        )
+        return RawQcChatResponse(answer=f"`@{alias}` is not a registered ChatGenome tool.", citations=[], used_fallback=False)
     alignment_kind = (payload.analysis.facts.file_kind or "").upper()
     if alignment_kind not in {"BAM", "SAM", "CRAM", "ALIGNMENT"}:
         return RawQcChatResponse(
@@ -806,22 +972,22 @@ def _handle_summary_stats_at_tool_request(
     manifest = tool_request.get("manifest")
     alias = str(tool_request.get("alias") or "")
     remainder = str(tool_request.get("remainder") or "")
+    help_text = _resolve_tool_help_response(tool_request)
+    if help_text is not None:
+        return SummaryStatsChatResponse(answer=help_text, citations=[], used_fallback=False)
+    mismatch_text = _resolve_tool_source_mismatch_response(tool_request, "summary_stats")
+    if mismatch_text is not None:
+        return SummaryStatsChatResponse(answer=mismatch_text, citations=[], used_fallback=False)
     if manifest is None:
         return SummaryStatsChatResponse(
             answer=f"`@{alias}` is not a registered ChatGenome tool.",
             citations=[],
             used_fallback=False,
         )
-    if bool(tool_request.get("is_help")):
-        return SummaryStatsChatResponse(answer=_render_tool_help(manifest), citations=[], used_fallback=False)
 
     name = str(manifest.get("name") or "")
     if name != "qqman_execution_tool":
-        return SummaryStatsChatResponse(
-            answer=f"`@{alias}` is not available for the current summary-statistics source type.",
-            citations=[],
-            used_fallback=False,
-        )
+        return SummaryStatsChatResponse(answer=f"`@{alias}` is not a registered ChatGenome tool.", citations=[], used_fallback=False)
 
     source_stats_path = payload.analysis.source_stats_path
     if not source_stats_path:
