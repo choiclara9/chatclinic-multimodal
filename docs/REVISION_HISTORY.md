@@ -151,6 +151,39 @@ Why it mattered:
 - users can see that long-running deterministic tools are still working
 - stale “ready” states no longer make active tool runs look frozen
 
+### 8. `@skill` routing was generalized into workflow-driven dispatch
+
+Relevant commits:
+- `17dcc8a` Standardize workflow manifests and lookup
+- `15a21e1` Normalize @skill parsing and help flow
+- `67e16b8` Route prs_prep through generic workflow runner
+- `96a9d19` Route summary_stats_review through generic workflow runner
+- `8f5fdb0` Route raw_qc_review through generic workflow runner
+- `24eb098` Route representative_vcf_review through generic workflow runner
+- `8687c2d` Clean up generic skill workflow dispatch
+
+What changed:
+- workflow manifests were standardized around:
+  - `name`
+  - `source_type`
+  - `requested_view`
+  - `requires`
+  - `produces`
+- workflow lookup moved into shared helpers in `app/services/workflows.py`
+- `@skill` parsing was normalized into a common request shape
+- `@skill help` and `@skill <workflow> help` now follow a shared registry-backed path
+- workflow execution moved from scattered `if workflow_name == ...` branches toward source-type-specific workflow dispatch tables
+- the following workflows now run through generic runners:
+  - `representative_vcf_review`
+  - `raw_qc_review`
+  - `summary_stats_review`
+  - `prs_prep`
+
+Why it mattered:
+- workflow registration and execution are now much closer to data-driven
+- adding a new workflow requires less bespoke chat branching
+- `@mode`, `@skill`, and workflow manifests now align more cleanly
+
 ## Current State Summary
 
 ChatGenome now supports:
@@ -163,13 +196,14 @@ ChatGenome now supports:
 - summary-statistics plotting with `qqman`
 - PRS prep plus PLINK scoring MVP
 - genericized `@tool` parsing, help, compatibility checks, and dispatch routing
+- genericized `@skill` parsing, help, manifest lookup, and workflow dispatch
 - direct-tool running status feedback in the chat header
 
 ## Known Follow-up Areas
 
 Still desirable:
 
-- more generic backend runners for `@skill`
 - standalone evidence tools such as `@clinvar`, `@gnomad`, and `@vep`
 - improved contributor-facing tool metadata and registration patterns
 - more polished onboarding and mode-specific guidance
+- more reusable generic workflow runners for future source types beyond the current VCF/raw-QC/summary-statistics set

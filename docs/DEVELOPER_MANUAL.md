@@ -278,6 +278,148 @@ There are usually three parts:
 
 ## 4. How To Add A New Workflow
 
+Each workflow is described in a JSON manifest and executed through the workflow helpers in:
+
+- [../app/services/workflows.py](../app/services/workflows.py)
+
+### Step 1. Create the workflow manifest
+
+Add a JSON file under:
+
+```text
+skills/chatgenome-orchestrator/workflows/<workflow_name>.json
+```
+
+Recommended shape:
+
+```json
+{
+  "name": "example_review",
+  "description": "Run the example review workflow.",
+  "source_type": "summary_stats",
+  "steps": [
+    "example_tool"
+  ],
+  "requested_view": "example",
+  "default_view": "example",
+  "requires": [
+    "source_stats_path"
+  ],
+  "produces": [
+    "example_result"
+  ]
+}
+```
+
+Required fields in practice:
+- `name`
+- `description`
+- `source_type`
+- `steps`
+- `requested_view`
+
+Strongly recommended:
+- `requires`
+- `produces`
+
+### Step 2. Choose the correct source type
+
+Current workflow source types are:
+- `vcf`
+- `raw_qc`
+- `summary_stats`
+
+Match the manifest to the session type selected by `@mode`.
+
+Examples:
+- `representative_vcf_review` -> `vcf`
+- `raw_qc_review` -> `raw_qc`
+- `summary_stats_review` -> `summary_stats`
+- `prs_prep` -> `summary_stats`
+
+### Step 3. Implement or reuse a generic workflow runner
+
+Current runner helpers live in:
+- [../app/services/workflows.py](../app/services/workflows.py)
+
+Current pattern:
+- `run_registered_analysis_workflow(...)`
+- `run_registered_raw_qc_workflow(...)`
+- `run_registered_summary_stats_workflow(...)`
+
+Each runner should:
+1. load the manifest
+2. validate `source_type`
+3. validate `requires`
+4. execute the workflow
+5. return a structured dict with at least:
+   - `answer`
+   - `requested_view`
+   - refreshed analysis object
+
+### Step 4. Connect the workflow to chat dispatch
+
+`app/services/chat.py` now uses workflow dispatch tables rather than ad hoc `if workflow_name == ...` branches.
+
+Current pattern:
+- `ANALYSIS_WORKFLOW_DISPATCH`
+- `RAW_QC_WORKFLOW_DISPATCH`
+- `SUMMARY_STATS_WORKFLOW_DISPATCH`
+
+When adding a workflow:
+1. add its manifest
+2. extend the appropriate runner in `workflows.py`
+3. add a dispatch entry in `chat.py`
+4. verify `@skill help` and `@skill <workflow>` behavior
+
+### Step 5. Decide what state the workflow produces
+
+Examples:
+- VCF workflow -> refreshed `AnalysisResponse`
+- raw QC workflow -> refreshed `RawQcResponse`
+- summary stats workflow -> refreshed `SummaryStatsResponse`
+
+If the workflow produces an extra structured artifact, return it explicitly.
+
+Example:
+- `prs_prep` also returns `prs_prep_result`
+
+### Step 6. Update frontend expectations only if needed
+
+Most workflow changes should not require frontend parser changes.
+
+Frontend work is only needed when:
+- a new `requested_view` is introduced
+- a new Studio card is added
+- a new direct result state must be rendered
+
+Primary file:
+- [../webapp/app/page.tsx](../webapp/app/page.tsx)
+
+### Step 7. Smoke test checklist
+
+For each workflow, test:
+- `@skill help`
+- `@skill <workflow> help`
+- `@skill <workflow>`
+- the expected Studio view opens
+- the refreshed state is returned
+
+Recommended minimal smoke tests by source type:
+- VCF:
+  - `@mode vcf_analysis`
+  - upload a VCF
+  - `@skill representative_vcf_review`
+- raw QC:
+  - `@mode raw_sequence`
+  - upload a FASTQ/BAM/SAM/CRAM source
+  - `@skill raw_qc_review`
+- summary stats:
+  - `@mode prs`
+  - upload summary statistics
+  - `@skill summary_stats_review`
+  - `@skill prs_prep`
+
 ### Step 1. Create a workflow JSON
 
 Add a file under:
