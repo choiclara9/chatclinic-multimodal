@@ -5,7 +5,7 @@ import os
 import uuid
 from functools import lru_cache
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from app.models import (
     AnalysisFacts,
@@ -85,7 +85,392 @@ def annotation_key(item: VariantAnnotation) -> tuple[str, int, str, tuple[str, .
     return (item.contig, item.pos_1based, item.ref, tuple(item.alts))
 
 
-def analyze_vcf_workflow(
+def _vcf_context_shortlisted_annotations(context: dict[str, Any]) -> list[VariantAnnotation]:
+    annotations = list(context.get("annotations") or [])
+    roh_segments = list(context.get("roh_segments") or [])
+    preliminary_candidates = build_ranked_candidates(annotations, roh_segments, limit=24)
+    return [entry.item for entry in preliminary_candidates]
+
+
+def _vcf_workflow_context(
+    path: str,
+    annotation_scope: str,
+    annotation_limit: int | None,
+) -> dict[str, Any]:
+    return {
+        "source_vcf_path": path,
+        "annotation_scope": annotation_scope,
+        "annotation_limit": annotation_limit,
+        "max_examples": int(os.getenv("MAX_EXAMPLE_VARIANTS", "8")),
+        "used_tools": [],
+        "tool_registry": discover_tools(),
+        "facts": None,
+        "annotations": [],
+        "roh_segments": [],
+        "snpeff_result": None,
+        "candidate_variants": [],
+        "clinvar_summary": [],
+        "consequence_summary": [],
+        "clinical_coverage_summary": [],
+        "filtering_summary": [],
+        "symbolic_alt_summary": SymbolicAltSummary(count=0, examples=[]),
+        "references": [],
+        "recommendations": [],
+        "ui_cards": [],
+        "draft_answer": "",
+    }
+
+
+def _run_vcf_workflow_step(step: dict[str, Any], context: dict[str, Any]) -> None:
+    tool_name = str(step.get("tool") or "").strip()
+    bind_name = str(step.get("bind") or "").strip()
+    needs = [str(item).strip() for item in step.get("needs", []) if str(item).strip()]
+    on_fail = str(step.get("on_fail") or "raise").strip().lower()
+
+    for need in needs:
+        value = context.get(need)
+        if value in (None, "", []):
+            raise RuntimeError(f"VCF workflow step `{tool_name}` is missing required context `{need}`.")
+
+    path = str(context["source_vcf_path"])
+    used_tools: list[str] = context["used_tools"]
+
+    try:
+        if tool_name == "vcf_qc_tool":
+            qc_result = run_tool(
+                "vcf_qc_tool",
+                {
+                    "vcf_path": path,
+                    "max_examples": context["max_examples"],
+                },
+            )
+            context[bind_name] = AnalysisFacts(**qc_result["facts"])
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "annotation_tool":
+            facts: AnalysisFacts = context["facts"]
+            annotation_result = run_tool(
+                "annotation_tool",
+                {
+                    "vcf_path": path,
+                    "facts": facts.model_dump(),
+                    "scope": context["annotation_scope"],
+                    "limit": context["annotation_limit"],
+                },
+            )
+            context[bind_name] = [VariantAnnotation(**item) for item in annotation_result["annotations"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "snpeff_execution_tool":
+            facts = context["facts"]
+            from app.models import SnpEffResponse
+
+            snpeff_payload = run_tool(
+                "snpeff_execution_tool",
+                {
+                    "vcf_path": path,
+                    "genome": snpeff_genome_from_build(facts.genome_build_guess),
+                    "output_prefix": f"{Path(path).stem}.aux",
+                    "parse_limit": 10,
+                },
+            )
+            context[bind_name] = SnpEffResponse(**snpeff_payload)
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "roh_analysis_tool":
+            roh_result = run_tool("roh_analysis_tool", {"vcf_path": path})
+            context[bind_name] = [RohSegment(**item) for item in roh_result["roh_segments"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "cadd_lookup_tool":
+            facts = context["facts"]
+            annotations = list(context["annotations"])
+            shortlisted_annotations = _vcf_context_shortlisted_annotations(context)
+            cadd_result = run_tool(
+                "cadd_lookup_tool",
+                {
+                    "annotations": [item.model_dump() for item in shortlisted_annotations],
+                    "genome_build_guess": facts.genome_build_guess,
+                },
+            )
+            enriched_shortlisted_annotations = [VariantAnnotation(**item) for item in cadd_result["annotations"]]
+            if bool(cadd_result.get("lookup_performed")):
+                used_tools.append(tool_name)
+            enriched_by_key = {annotation_key(item): item for item in enriched_shortlisted_annotations}
+            context[bind_name] = [enriched_by_key.get(annotation_key(item), item) for item in annotations]
+            return
+
+        if tool_name == "revel_lookup_tool":
+            facts = context["facts"]
+            annotations = list(context["annotations"])
+            shortlisted_annotations = _vcf_context_shortlisted_annotations(context)
+            revel_result = run_tool(
+                "revel_lookup_tool",
+                {
+                    "annotations": [item.model_dump() for item in shortlisted_annotations],
+                    "genome_build_guess": facts.genome_build_guess,
+                },
+            )
+            revel_enriched_annotations = [VariantAnnotation(**item) for item in revel_result["annotations"]]
+            if bool(revel_result.get("lookup_performed")):
+                used_tools.append(tool_name)
+            revel_by_key = {annotation_key(item): item for item in revel_enriched_annotations}
+            context[bind_name] = [revel_by_key.get(annotation_key(item), item) for item in annotations]
+            return
+
+        if tool_name == "candidate_ranking_tool":
+            candidate_result = run_tool(
+                "candidate_ranking_tool",
+                {
+                    "annotations": [item.model_dump() for item in context["annotations"]],
+                    "roh_segments": [item.model_dump() for item in context["roh_segments"]],
+                    "limit": 8,
+                },
+            )
+            context[bind_name] = [RankedCandidate(**item) for item in candidate_result["candidate_variants"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "clinvar_review_tool":
+            clinvar_result = run_tool(
+                "clinvar_review_tool",
+                {"annotations": [item.model_dump() for item in context["annotations"]]},
+            )
+            context[bind_name] = [CountSummaryItem(**item) for item in clinvar_result["clinvar_summary"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "vep_consequence_tool":
+            consequence_result = run_tool(
+                "vep_consequence_tool",
+                {
+                    "annotations": [item.model_dump() for item in context["annotations"]],
+                    "limit": 10,
+                },
+            )
+            context[bind_name] = [CountSummaryItem(**item) for item in consequence_result["consequence_summary"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "clinical_coverage_tool":
+            coverage_result = run_tool(
+                "clinical_coverage_tool",
+                {"annotations": [item.model_dump() for item in context["annotations"]]},
+            )
+            context[bind_name] = [DetailedCountSummaryItem(**item) for item in coverage_result["clinical_coverage_summary"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "filtering_view_tool":
+            filtering_result = run_tool(
+                "filtering_view_tool",
+                {"annotations": [item.model_dump() for item in context["annotations"]]},
+            )
+            context[bind_name] = [DetailedCountSummaryItem(**item) for item in filtering_result["filtering_summary"]]
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "symbolic_alt_tool":
+            symbolic_result = run_tool(
+                "symbolic_alt_tool",
+                {"annotations": [item.model_dump() for item in context["annotations"]]},
+            )
+            context[bind_name] = SymbolicAltSummary(**symbolic_result["symbolic_alt_summary"])
+            used_tools.append(tool_name)
+            return
+
+        if tool_name == "grounded_summary_tool":
+            facts = context["facts"]
+            annotations = list(context["annotations"])
+            references = build_reference_bundle(facts, annotations[: min(len(annotations), 20)])
+            recommendations = build_recommendations(facts)
+            ui_cards = build_ui_cards(facts, annotations)
+            context["references"] = references
+            context["recommendations"] = recommendations
+            context["ui_cards"] = ui_cards
+            summary_result = run_tool(
+                "grounded_summary_tool",
+                {
+                    "facts": facts.model_dump(),
+                    "annotations": [item.model_dump() for item in annotations],
+                    "references": [item.model_dump() for item in references],
+                    "recommendations": [item.model_dump() for item in recommendations],
+                },
+            )
+            context[bind_name] = str(summary_result["draft_answer"])
+            used_tools.append(tool_name)
+            return
+
+        raise NotImplementedError(f"Unsupported VCF workflow step tool: {tool_name}")
+    except Exception:
+        if on_fail != "continue":
+            raise
+
+    if tool_name == "vcf_qc_tool":
+        context[bind_name] = summarize_vcf(path, max_examples=context["max_examples"])
+        return
+    if tool_name == "annotation_tool":
+        facts = context["facts"]
+        context[bind_name] = annotate_variants(
+            path,
+            facts,
+            scope=context["annotation_scope"],
+            limit=context["annotation_limit"],
+        )
+        return
+    if tool_name == "roh_analysis_tool":
+        context[bind_name] = run_roh_analysis(path)
+        return
+    if tool_name == "candidate_ranking_tool":
+        context[bind_name] = build_ranked_candidates(context["annotations"], context["roh_segments"], limit=8)
+        return
+    if tool_name == "clinvar_review_tool":
+        counts: dict[str, int] = {}
+        for item in context["annotations"]:
+            key = (
+                item.clinical_significance.strip()
+                if item.clinical_significance and item.clinical_significance != "."
+                else "Unreviewed"
+            )
+            counts[key] = counts.get(key, 0) + 1
+        context[bind_name] = [
+            CountSummaryItem(label=label, count=count)
+            for label, count in sorted(counts.items(), key=lambda part: part[1], reverse=True)
+        ]
+        return
+    if tool_name == "vep_consequence_tool":
+        counts: dict[str, int] = {}
+        for item in context["annotations"]:
+            key = item.consequence.strip() if item.consequence and item.consequence != "." else "Unclassified"
+            counts[key] = counts.get(key, 0) + 1
+        context[bind_name] = [
+            CountSummaryItem(label=label, count=count)
+            for label, count in sorted(counts.items(), key=lambda part: part[1], reverse=True)[:10]
+        ]
+        return
+    if tool_name == "clinical_coverage_tool":
+        annotations = list(context["annotations"])
+        total = len(annotations)
+
+        def detail(label: str, count: int) -> DetailedCountSummaryItem:
+            percent = round((count / total) * 100) if total else 0
+            return DetailedCountSummaryItem(label=label, count=count, detail=f"{count}/{total} annotated ({percent}%)")
+
+        context[bind_name] = [
+            detail(
+                "ClinVar coverage",
+                sum(
+                    1
+                    for item in annotations
+                    if (item.clinical_significance and item.clinical_significance != ".")
+                    or (item.clinvar_conditions and item.clinvar_conditions != ".")
+                ),
+            ),
+            detail("gnomAD coverage", sum(1 for item in annotations if item.gnomad_af and item.gnomad_af != ".")),
+            detail("Gene mapping", sum(1 for item in annotations if item.gene and item.gene != ".")),
+            detail(
+                "HGVS coverage",
+                sum(1 for item in annotations if (item.hgvsc and item.hgvsc != ".") or (item.hgvsp and item.hgvsp != ".")),
+            ),
+            detail("Protein change", sum(1 for item in annotations if item.hgvsp and item.hgvsp != ".")),
+        ]
+        return
+    if tool_name == "filtering_view_tool":
+        annotations = list(context["annotations"])
+        unique_genes = {item.gene.strip() for item in annotations if item.gene and item.gene.strip() not in {"", "."}}
+        clinvar_labeled = sum(1 for item in annotations if item.clinical_significance and item.clinical_significance != ".")
+        symbolic = sum(1 for item in annotations if any(alt.startswith("<") and alt.endswith(">") for alt in item.alts))
+        context[bind_name] = [
+            DetailedCountSummaryItem(
+                label="Annotated rows", count=len(annotations), detail=f"{len(annotations)} rows currently available in the triage table"
+            ),
+            DetailedCountSummaryItem(
+                label="Distinct genes", count=len(unique_genes), detail=f"{len(unique_genes)} genes represented in the annotated subset"
+            ),
+            DetailedCountSummaryItem(
+                label="ClinVar-labeled rows",
+                count=clinvar_labeled,
+                detail=f"{clinvar_labeled} rows contain a ClinVar-style significance label",
+            ),
+            DetailedCountSummaryItem(
+                label="Symbolic ALT rows",
+                count=symbolic,
+                detail=f"{symbolic} rows are symbolic ALT records that may need separate handling",
+            ),
+        ]
+        return
+    if tool_name == "symbolic_alt_tool":
+        symbolic_items = [
+            item for item in context["annotations"] if any(alt.startswith("<") and alt.endswith(">") for alt in item.alts)
+        ]
+        context[bind_name] = SymbolicAltSummary(
+            count=len(symbolic_items),
+            examples=[
+                {
+                    "locus": f"{item.contig}:{item.pos_1based}",
+                    "gene": item.gene or "",
+                    "alts": item.alts,
+                    "consequence": item.consequence or "",
+                    "genotype": item.genotype or "",
+                }
+                for item in symbolic_items[:5]
+            ],
+        )
+        return
+    if tool_name == "grounded_summary_tool":
+        facts = context["facts"]
+        annotations = list(context["annotations"])
+        references = build_reference_bundle(facts, annotations[: min(len(annotations), 20)])
+        recommendations = build_recommendations(facts)
+        ui_cards = build_ui_cards(facts, annotations)
+        context["references"] = references
+        context["recommendations"] = recommendations
+        context["ui_cards"] = ui_cards
+        context[bind_name] = build_draft_answer(
+            facts,
+            annotations,
+            [item.id for item in references],
+            [item.id for item in recommendations],
+        )
+        return
+
+
+def _assemble_analysis_response_from_vcf_context(context: dict[str, Any]) -> AnalysisResponse:
+    facts: AnalysisFacts = context["facts"]
+    annotations = list(context["annotations"])
+    if not context["references"]:
+        context["references"] = build_reference_bundle(facts, annotations[: min(len(annotations), 20)])
+    if not context["recommendations"]:
+        context["recommendations"] = build_recommendations(facts)
+    if not context["ui_cards"]:
+        context["ui_cards"] = build_ui_cards(facts, annotations)
+    return AnalysisResponse(
+        analysis_id=str(uuid.uuid4()),
+        facts=facts,
+        annotations=annotations,
+        roh_segments=list(context["roh_segments"]),
+        source_vcf_path=str(context["source_vcf_path"]),
+        snpeff_result=context.get("snpeff_result"),
+        candidate_variants=list(context["candidate_variants"]),
+        clinvar_summary=list(context["clinvar_summary"]),
+        consequence_summary=list(context["consequence_summary"]),
+        clinical_coverage_summary=list(context["clinical_coverage_summary"]),
+        filtering_summary=list(context["filtering_summary"]),
+        symbolic_alt_summary=context["symbolic_alt_summary"],
+        references=list(context["references"]),
+        recommendations=list(context["recommendations"]),
+        ui_cards=list(context["ui_cards"]),
+        draft_answer=str(context["draft_answer"]),
+        used_tools=list(context["used_tools"]),
+        tool_registry=list(context["tool_registry"]),
+    )
+
+
+def _analyze_vcf_workflow_legacy(
     path: str,
     annotation_scope: str = "representative",
     annotation_limit: int | None = None,
@@ -375,6 +760,46 @@ def analyze_vcf_workflow(
         draft_answer=draft_answer,
         used_tools=used_tools,
         tool_registry=tool_registry,
+    )
+
+
+def _run_registered_vcf_workflow_from_manifest(
+    path: str,
+    manifest: dict[str, object],
+    annotation_scope: str = "representative",
+    annotation_limit: int | None = None,
+) -> AnalysisResponse:
+    context = _vcf_workflow_context(path, annotation_scope=annotation_scope, annotation_limit=annotation_limit)
+    steps = manifest.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError(f"Workflow {manifest.get('name')} does not define a valid step list.")
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ValueError(f"Workflow {manifest.get('name')} contains a non-object step.")
+        _run_vcf_workflow_step(step, context)
+    return _assemble_analysis_response_from_vcf_context(context)
+
+
+def analyze_vcf_workflow(
+    path: str,
+    annotation_scope: str = "representative",
+    annotation_limit: int | None = None,
+) -> AnalysisResponse:
+    manifest = load_workflow_manifest("representative_vcf_review")
+    structured_steps = isinstance(manifest, dict) and isinstance(manifest.get("steps"), list) and all(
+        isinstance(step, dict) for step in manifest.get("steps", [])
+    )
+    if annotation_scope == "representative" and annotation_limit is None and structured_steps:
+        return _run_registered_vcf_workflow_from_manifest(
+            path,
+            manifest,
+            annotation_scope=annotation_scope,
+            annotation_limit=annotation_limit,
+        )
+    return _analyze_vcf_workflow_legacy(
+        path,
+        annotation_scope=annotation_scope,
+        annotation_limit=annotation_limit,
     )
 
 

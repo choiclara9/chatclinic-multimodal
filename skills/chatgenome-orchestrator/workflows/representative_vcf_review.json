@@ -12,16 +12,100 @@
     "candidate_variants"
   ],
   "steps": [
-    "vcf_qc_tool",
-    "annotation_tool",
-    "roh_analysis_tool",
-    "candidate_ranking_tool",
-    "clinvar_review_tool",
-    "vep_consequence_tool",
-    "clinical_coverage_tool",
-    "filtering_view_tool",
-    "symbolic_alt_tool",
-    "grounded_summary_tool"
+    {
+      "tool": "vcf_qc_tool",
+      "bind": "facts"
+    },
+    {
+      "tool": "annotation_tool",
+      "needs": [
+        "facts"
+      ],
+      "bind": "annotations"
+    },
+    {
+      "tool": "snpeff_execution_tool",
+      "needs": [
+        "facts"
+      ],
+      "bind": "snpeff_result",
+      "on_fail": "continue"
+    },
+    {
+      "tool": "roh_analysis_tool",
+      "bind": "roh_segments"
+    },
+    {
+      "tool": "cadd_lookup_tool",
+      "needs": [
+        "facts",
+        "annotations",
+        "roh_segments"
+      ],
+      "bind": "annotations",
+      "on_fail": "continue"
+    },
+    {
+      "tool": "revel_lookup_tool",
+      "needs": [
+        "facts",
+        "annotations",
+        "roh_segments"
+      ],
+      "bind": "annotations",
+      "on_fail": "continue"
+    },
+    {
+      "tool": "candidate_ranking_tool",
+      "needs": [
+        "annotations",
+        "roh_segments"
+      ],
+      "bind": "candidate_variants"
+    },
+    {
+      "tool": "clinvar_review_tool",
+      "needs": [
+        "annotations"
+      ],
+      "bind": "clinvar_summary"
+    },
+    {
+      "tool": "vep_consequence_tool",
+      "needs": [
+        "annotations"
+      ],
+      "bind": "consequence_summary"
+    },
+    {
+      "tool": "clinical_coverage_tool",
+      "needs": [
+        "annotations"
+      ],
+      "bind": "clinical_coverage_summary"
+    },
+    {
+      "tool": "filtering_view_tool",
+      "needs": [
+        "annotations"
+      ],
+      "bind": "filtering_summary"
+    },
+    {
+      "tool": "symbolic_alt_tool",
+      "needs": [
+        "annotations"
+      ],
+      "bind": "symbolic_alt_summary"
+    },
+    {
+      "tool": "grounded_summary_tool",
+      "needs": [
+        "facts",
+        "annotations"
+      ],
+      "bind": "draft_answer"
+    }
   ],
   "default_view": "summary",
   "notes": [
