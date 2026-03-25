@@ -184,6 +184,27 @@ Why it mattered:
 - adding a new workflow requires less bespoke chat branching
 - `@mode`, `@skill`, and workflow manifests now align more cleanly
 
+### 9. Workflow steps started moving from Python-only wiring toward metadata-driven tool bindings
+
+Relevant commits:
+- `96b6f65` Add JSON-driven representative VCF workflow runner
+- `74bcd9d` Expand JSON-driven workflow runners for summary and raw QC
+- `d5c2076` Registry-ize workflow step executors and help rendering
+- `744b3d8` Add metadata-driven workflow bindings for VCF tools
+
+What changed:
+- workflow manifests began using structured step objects instead of plain string step names
+- representative VCF, summary-statistics, PRS prep, and raw-QC workflows all gained structured step schemas
+- step execution moved from large tool-name branches toward executor registries
+- several standard VCF tools now declare `workflow_binding` metadata in `tool.json`
+- the VCF workflow runner can resolve payloads, result extraction, transforms, and selected fallback behavior from tool metadata
+- workflow help rendering was updated so structured step definitions show clearly in both chat and the frontend
+
+Why it mattered:
+- workflow JSON now carries more of the true execution contract
+- standard workflow tools can increasingly be reordered or recombined through metadata
+- adding future workflow-aware tools can require less bespoke Python branching
+
 ## Current State Summary
 
 ChatGenome now supports:
@@ -198,6 +219,7 @@ ChatGenome now supports:
 - genericized `@tool` parsing, help, compatibility checks, and dispatch routing
 - genericized `@skill` parsing, help, manifest lookup, and workflow dispatch
 - direct-tool running status feedback in the chat header
+- structured workflow-step schemas and metadata-driven workflow bindings for standard VCF tools
 
 ## Known Follow-up Areas
 
@@ -207,3 +229,4 @@ Still desirable:
 - improved contributor-facing tool metadata and registration patterns
 - more polished onboarding and mode-specific guidance
 - more reusable generic workflow runners for future source types beyond the current VCF/raw-QC/summary-statistics set
+- richer workflow-binding metadata for custom preprocess/postprocess hooks so even fewer `workflows.py` changes are needed

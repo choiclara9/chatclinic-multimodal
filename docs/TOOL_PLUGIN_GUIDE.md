@@ -46,6 +46,34 @@ Use `help` metadata for:
 - option documentation
 - curated examples
 
+## Workflow-Aware Metadata
+
+If the tool should participate in workflow JSON steps, add `workflow_binding`.
+
+Example:
+
+```json
+{
+  "workflow_binding": {
+    "source_type": "vcf",
+    "input_map": {
+      "vcf_path": "$source_vcf_path",
+      "facts": "$facts"
+    },
+    "result_path": "annotations",
+    "transform": "variant_annotation_list",
+    "used_tools_label": "annotation_tool",
+    "fallback_transform": "annotation_local"
+  }
+}
+```
+
+Meaning:
+- `input_map`: workflow context -> tool payload
+- `result_path`: top-level field to read from tool output
+- `transform`: normalize tool output into workflow context models
+- `fallback_transform`: optional local fallback when tool execution fails
+
 ## Required Runtime Contract
 
 `run.py` is expected to support:
@@ -71,6 +99,7 @@ After adding the plugin files, make sure you also:
    - usually in [../app/main.py](../app/main.py),
    - [../app/services/chat.py](../app/services/chat.py), or
    - [../app/services/workflows.py](../app/services/workflows.py)
+   - prefer `workflow_binding` metadata before adding bespoke workflow code
 3. add Studio rendering in
    - [../webapp/app/page.tsx](../webapp/app/page.tsx)
 4. update orchestrator policy in
@@ -96,6 +125,8 @@ Runtime checks:
 - `@toolname help`
 - direct `@toolname`
 - Studio card rendering
+- workflow help if the tool is used by a workflow
+- workflow execution if the tool participates in structured steps
 
 ## Preferred Design Rule
 

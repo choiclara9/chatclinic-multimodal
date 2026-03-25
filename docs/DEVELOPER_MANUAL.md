@@ -194,6 +194,68 @@ Important rules:
 - do not dump an entire upstream CLI into `help`
 - document only what ChatGenome actually supports
 
+### Step 3a. Add `workflow_binding` when the tool should run inside workflow JSON
+
+If the tool should be usable from workflow step manifests, add a `workflow_binding` block.
+
+Current metadata-driven VCF bindings follow this pattern:
+
+```json
+{
+  "name": "annotation_tool",
+  "description": "Generates transcript-aware variant annotations for a VCF analysis run.",
+  "task": "annotation",
+  "modality": "genomics",
+  "approval_required": false,
+  "source": "plugin",
+  "workflow_binding": {
+    "source_type": "vcf",
+    "input_map": {
+      "vcf_path": "$source_vcf_path",
+      "facts": "$facts",
+      "scope": "$annotation_scope",
+      "limit": "$annotation_limit"
+    },
+    "result_path": "annotations",
+    "transform": "variant_annotation_list",
+    "used_tools_label": "annotation_tool",
+    "fallback_transform": "annotation_local"
+  }
+}
+```
+
+What these fields mean:
+- `source_type`: workflow family such as `vcf`
+- `input_map`: maps workflow context keys into tool payload fields
+- `result_path`: top-level tool output field to bind back into workflow context
+- `transform`: runtime normalization rule
+- `used_tools_label`: what to append to `used_tools`
+- `fallback_transform`: optional local fallback path if deterministic execution fails
+
+Current generic VCF transforms include:
+- `analysis_facts`
+- `variant_annotation_list`
+- `roh_segment_list`
+- `ranked_candidate_list`
+- `count_summary_list`
+- `detailed_count_summary_list`
+- `symbolic_alt_summary`
+
+Current generic VCF fallback transforms include:
+- `vcf_qc_summary`
+- `annotation_local`
+- `roh_local`
+- `candidate_ranking_local`
+- `clinvar_summary_local`
+- `vep_consequence_local`
+- `clinical_coverage_local`
+- `filtering_view_local`
+- `symbolic_alt_local`
+
+Developer rule of thumb:
+- if your tool fits an existing transform and fallback pattern, you can usually add it with `tool.json`, `run.py`, and workflow JSON
+- if your tool needs a new result type, custom merge behavior, or bespoke pre/post-processing hook, you still need a small `app/services/workflows.py` update
+
 ### Step 4. Write `run.py`
 
 Your script must:
@@ -262,7 +324,7 @@ Typical places:
 - `app/main.py`
 
 Recommended division of responsibility:
-- `tool.json`: metadata and help facts
+- `tool.json`: metadata, help facts, and workflow-binding facts
 - `SKILL.md`: policy and recommendation
 - backend: dispatch, execution, persistence
 
@@ -298,7 +360,10 @@ Recommended shape:
   "description": "Run the example review workflow.",
   "source_type": "summary_stats",
   "steps": [
-    "example_tool"
+    {
+      "tool": "example_tool",
+      "bind": "example_result"
+    }
   ],
   "requested_view": "example",
   "default_view": "example",
@@ -321,6 +386,12 @@ Required fields in practice:
 Strongly recommended:
 - `requires`
 - `produces`
+
+Structured step fields:
+- `tool`: tool name from `tool.json`
+- `bind`: workflow context key that should be updated
+- `needs`: optional context keys that must already exist
+- `on_fail`: optional override such as `continue`
 
 ### Step 2. Choose the correct source type
 
@@ -357,6 +428,15 @@ Each runner should:
    - `requested_view`
    - refreshed analysis object
 
+Current runtime split:
+- workflow ordering lives in workflow JSON
+- many standard VCF step bindings now live in `tool.json.workflow_binding`
+- `app/services/workflows.py` still owns:
+  - workflow context construction
+  - transform/fallback registries
+  - custom executors for tools that need bespoke pre/post-processing
+  - final response assembly
+
 ### Step 4. Connect the workflow to chat dispatch
 
 `app/services/chat.py` now uses workflow dispatch tables rather than ad hoc `if workflow_name == ...` branches.
@@ -368,9 +448,10 @@ Current pattern:
 
 When adding a workflow:
 1. add its manifest
-2. extend the appropriate runner in `workflows.py`
-3. add a dispatch entry in `chat.py`
-4. verify `@skill help` and `@skill <workflow>` behavior
+2. reuse metadata-driven tools when possible
+3. extend the appropriate runner in `workflows.py` only if the workflow introduces a new source type, transform, fallback, or custom hook
+4. add a dispatch entry in `chat.py`
+5. verify `@skill help` and `@skill <workflow>` behavior
 
 ### Step 5. Decide what state the workflow produces
 
@@ -518,6 +599,9 @@ Put execution facts in:
 Examples:
 - alias
 - help summary
+- workflow binding
+- result transform
+- fallback transform
 - options
 - examples
 
