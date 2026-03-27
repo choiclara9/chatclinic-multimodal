@@ -818,6 +818,95 @@ function ArtifactLinksRow({ items }: { items: ArtifactLinkItem[] }) {
   );
 }
 
+type SimpleListItem = {
+  label: string;
+  detail: string;
+};
+
+function StudioSimpleList({
+  items,
+  emptyLabel,
+}: {
+  items: SimpleListItem[];
+  emptyLabel?: string;
+}) {
+  if (!items.length) {
+    return emptyLabel ? <p className="emptyState">{emptyLabel}</p> : null;
+  }
+
+  return (
+    <div className="resultList">
+      {items.map((item) => (
+        <article key={`${item.label}-${item.detail}`} className="resultListItem resultListStatic">
+          <strong>{item.label}</strong>
+          <span>{item.detail}</span>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function StudioPreviewTable({
+  columns,
+  rows,
+  rowHeaderLabel,
+  footer,
+}: {
+  columns: string[];
+  rows: Array<Record<string, string>>;
+  rowHeaderLabel?: string;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <div className="variantTableWrap summaryStatsTableWrap">
+      <table className="variantTable summaryStatsTable">
+        <thead>
+          <tr>
+            {rowHeaderLabel ? <th className="summaryStatsRowHeader">{rowHeaderLabel}</th> : null}
+            {columns.map((column) => (
+              <th key={column}>{column}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <tr key={`preview-row-${index}`}>
+              {rowHeaderLabel ? <td className="summaryStatsRowHeader">{index + 1}</td> : null}
+              {columns.map((column) => (
+                <td key={`${index}-${column}`}>{row[column] || ""}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {footer}
+    </div>
+  );
+}
+
+function ReferenceListCard({
+  items,
+}: {
+  items: Array<{ id: string; title: string; url: string }>;
+}) {
+  if (!items.length) {
+    return <p className="emptyState">No references are available for the current analysis.</p>;
+  }
+
+  return (
+    <ol className="referenceList">
+      {items.map((item, index) => (
+        <li key={item.id}>
+          <span className="referenceIndex">[{index + 1}]</span>{" "}
+          <a href={item.url} target="_blank" rel="noreferrer">
+            {item.title}
+          </a>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function VariantTable({
   items,
   onSelect,
@@ -3475,14 +3564,16 @@ export default function Page() {
                 <h2>Summary Stats Review</h2>
               </div>
               <div className="studioCanvasBody">
-                <div className="resultMetricGrid">
-                  <MetricTile label="Rows" value={String(summaryStatsAnalysis.row_count)} tone="good" />
-                  <MetricTile label="Columns" value={String(summaryStatsAnalysis.detected_columns.length)} tone="neutral" />
-                  <MetricTile label="Build" value={summaryStatsAnalysis.genome_build} tone="neutral" />
-                  <MetricTile label="Trait" value={summaryStatsAnalysis.trait_type} tone="neutral" />
-                  <MetricTile label="Delimiter" value={summaryStatsAnalysis.delimiter} tone="neutral" />
-                  <MetricTile label="Warnings" value={String(summaryStatsAnalysis.warnings.length)} tone="neutral" />
-                </div>
+                <StudioMetricGrid
+                  items={[
+                    { label: "Rows", value: String(summaryStatsAnalysis.row_count), tone: "good" },
+                    { label: "Columns", value: String(summaryStatsAnalysis.detected_columns.length) },
+                    { label: "Build", value: summaryStatsAnalysis.genome_build },
+                    { label: "Trait", value: summaryStatsAnalysis.trait_type },
+                    { label: "Delimiter", value: summaryStatsAnalysis.delimiter },
+                    { label: "Warnings", value: String(summaryStatsAnalysis.warnings.length) },
+                  ]}
+                />
                 <div className="resultSectionSplit">
                   <article className="miniCard">
                     <h3>Detected columns</h3>
@@ -3508,50 +3599,30 @@ export default function Page() {
                   <p className="summaryStatsGridMeta">
                     Showing {summaryStatsGridRows.length} of {summaryStatsAnalysis.row_count} rows
                   </p>
-                  <div ref={summaryStatsGridRef} className="variantTableWrap summaryStatsTableWrap" onScroll={handleSummaryStatsGridScroll}>
-                    <table className="variantTable summaryStatsTable">
-                      <thead>
-                        <tr>
-                          <th className="summaryStatsRowHeader">#</th>
-                          {summaryStatsAnalysis.detected_columns.map((column) => (
-                            <th key={column}>{column}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {summaryStatsGridRows.map((row, index) => (
-                          <tr key={`sumstats-preview-${index}`}>
-                            <td className="summaryStatsRowHeader">{index + 1}</td>
-                            {summaryStatsAnalysis.detected_columns.map((column) => (
-                              <td key={`${index}-${column}`}>{row[column] || ""}</td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    {summaryStatsRowsLoading ? <div className="summaryStatsGridFooter">Loading more rows...</div> : null}
-                    {!summaryStatsRowsLoading && summaryStatsHasMore ? (
-                      <div className="summaryStatsGridFooter">
-                        <button type="button" className="sourceAddButton summaryStatsLoadMoreButton" onClick={() => void loadMoreSummaryStatsRows()}>
-                          Load more rows
-                        </button>
-                      </div>
-                    ) : null}
-                    {!summaryStatsHasMore && summaryStatsGridRows.length ? (
-                      <div className="summaryStatsGridFooter">All loaded rows are shown.</div>
-                    ) : null}
+                  <div ref={summaryStatsGridRef} onScroll={handleSummaryStatsGridScroll}>
+                    <StudioPreviewTable
+                      columns={summaryStatsAnalysis.detected_columns}
+                      rows={summaryStatsGridRows}
+                      rowHeaderLabel="#"
+                      footer={
+                        <>
+                          {summaryStatsRowsLoading ? <div className="summaryStatsGridFooter">Loading more rows...</div> : null}
+                          {!summaryStatsRowsLoading && summaryStatsHasMore ? (
+                            <div className="summaryStatsGridFooter">
+                              <button type="button" className="sourceAddButton summaryStatsLoadMoreButton" onClick={() => void loadMoreSummaryStatsRows()}>
+                                Load more rows
+                              </button>
+                            </div>
+                          ) : null}
+                          {!summaryStatsHasMore && summaryStatsGridRows.length ? (
+                            <div className="summaryStatsGridFooter">All loaded rows are shown.</div>
+                          ) : null}
+                        </>
+                      }
+                    />
                   </div>
                 </article>
-                {summaryStatsAnalysis.warnings.length ? (
-                  <div className="resultList">
-                    {summaryStatsAnalysis.warnings.map((warning, index) => (
-                      <article key={`sumstats-warning-${index}`} className="resultListItem resultListStatic">
-                        <strong>Warning {index + 1}</strong>
-                        <span>{warning}</span>
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
+                <WarningListCard warnings={summaryStatsAnalysis.warnings} />
               </div>
             </section>
           ) : null}
@@ -3743,90 +3814,70 @@ export default function Page() {
               <div className="studioCanvasBody">
                 {samtoolsResultForStudio ? (
                   <>
-                    <div className="resultMetricGrid">
-                      <MetricTile label="File kind" value={samtoolsResultForStudio.file_kind} tone="good" />
-                      <MetricTile
-                        label="Total reads"
-                        value={
-                          samtoolsResultForStudio.total_reads != null
-                            ? String(samtoolsResultForStudio.total_reads)
-                            : "n/a"
-                        }
-                        tone="neutral"
-                      />
-                      <MetricTile
-                        label="Mapped"
-                        value={
-                          samtoolsResultForStudio.mapped_reads != null
-                            ? `${samtoolsResultForStudio.mapped_reads}${
-                                samtoolsResultForStudio.mapped_rate != null
-                                  ? ` (${samtoolsResultForStudio.mapped_rate.toFixed(2)}%)`
-                                  : ""
-                              }`
-                            : "n/a"
-                        }
-                        tone="good"
-                      />
-                      <MetricTile
-                        label="Properly paired"
-                        value={
-                          samtoolsResultForStudio.properly_paired_reads != null
-                            ? `${samtoolsResultForStudio.properly_paired_reads}${
-                                samtoolsResultForStudio.properly_paired_rate != null
-                                  ? ` (${samtoolsResultForStudio.properly_paired_rate.toFixed(2)}%)`
-                                  : ""
-                              }`
-                            : "n/a"
-                        }
-                        tone="neutral"
-                      />
-                      <MetricTile
-                        label="Quickcheck"
-                        value={samtoolsResultForStudio.quickcheck_ok ? "PASS" : "Issue detected"}
-                        tone={samtoolsResultForStudio.quickcheck_ok ? "good" : "warn"}
-                      />
-                      <MetricTile
-                        label="Index"
-                        value={samtoolsResultForStudio.index_path ? "Created / available" : "n/a"}
-                        tone="neutral"
-                      />
-                    </div>
+                    <StudioMetricGrid
+                      items={[
+                        { label: "File kind", value: samtoolsResultForStudio.file_kind, tone: "good" },
+                        {
+                          label: "Total reads",
+                          value: samtoolsResultForStudio.total_reads != null ? String(samtoolsResultForStudio.total_reads) : "n/a",
+                        },
+                        {
+                          label: "Mapped",
+                          value:
+                            samtoolsResultForStudio.mapped_reads != null
+                              ? `${samtoolsResultForStudio.mapped_reads}${
+                                  samtoolsResultForStudio.mapped_rate != null
+                                    ? ` (${samtoolsResultForStudio.mapped_rate.toFixed(2)}%)`
+                                    : ""
+                                }`
+                              : "n/a",
+                          tone: "good",
+                        },
+                        {
+                          label: "Properly paired",
+                          value:
+                            samtoolsResultForStudio.properly_paired_reads != null
+                              ? `${samtoolsResultForStudio.properly_paired_reads}${
+                                  samtoolsResultForStudio.properly_paired_rate != null
+                                    ? ` (${samtoolsResultForStudio.properly_paired_rate.toFixed(2)}%)`
+                                    : ""
+                                }`
+                              : "n/a",
+                        },
+                        {
+                          label: "Quickcheck",
+                          value: samtoolsResultForStudio.quickcheck_ok ? "PASS" : "Issue detected",
+                          tone: samtoolsResultForStudio.quickcheck_ok ? "good" : "warn",
+                        },
+                        {
+                          label: "Index",
+                          value: samtoolsResultForStudio.index_path ? "Created / available" : "n/a",
+                        },
+                      ]}
+                    />
                     <div className="resultSectionSplit">
                       <article className="miniCard">
                         <h3>samtools stats highlights</h3>
-                        <div className="resultList">
-                          {samtoolsResultForStudio.stats_highlights.map((item) => (
-                            <article key={item.label} className="resultListItem resultListStatic">
-                              <strong>{item.label}</strong>
-                              <span>{item.value}</span>
-                            </article>
-                          ))}
-                        </div>
+                        <StudioSimpleList
+                          items={samtoolsResultForStudio.stats_highlights.map((item) => ({
+                            label: item.label,
+                            detail: item.value,
+                          }))}
+                          emptyLabel="No samtools stats highlights are available."
+                        />
                       </article>
                       <article className="miniCard">
                         <h3>idxstats preview</h3>
-                        <div className="resultList">
-                          {samtoolsResultForStudio.idxstats_rows.map((row) => (
-                            <article key={`${row.contig}-${row.length_bp}`} className="resultListItem resultListStatic">
-                              <strong>{row.contig}</strong>
-                              <span>
-                                mapped {row.mapped} | unmapped {row.unmapped} | length {row.length_bp}
-                              </span>
-                            </article>
-                          ))}
-                        </div>
+                        <StudioSimpleList
+                          items={samtoolsResultForStudio.idxstats_rows.map((row) => ({
+                            label: row.contig,
+                            detail: `mapped ${row.mapped} | unmapped ${row.unmapped} | length ${row.length_bp}`,
+                          }))}
+                          emptyLabel="No idxstats preview rows are available."
+                        />
                       </article>
                     </div>
-                    {samtoolsResultForStudio.warnings.length ? (
-                      <div className="resultList">
-                        {samtoolsResultForStudio.warnings.map((warning, index) => (
-                          <article key={`${warning}-${index}`} className="miniCard">
-                            <h3>Warning</h3>
-                            <p>{warning}</p>
-                          </article>
-                        ))}
-                      </div>
-                    ) : null}
+                    <WarningListCard warnings={samtoolsResultForStudio.warnings} />
                   </>
                 ) : (
                   <p className="emptyState">No samtools result is available for the current raw-QC session.</p>
@@ -3998,36 +4049,18 @@ export default function Page() {
                 <h2>QC Summary</h2>
               </div>
               <div className="studioCanvasBody">
-                <div className="resultMetricGrid">
-                  <MetricTile label="PASS rate" value={formatPercent(qcMetrics?.pass_rate)} tone="good" />
-                  <MetricTile
-                    label="Ti/Tv"
-                    value={formatNumber(qcMetrics?.transition_transversion_ratio)}
-                    tone="neutral"
-                  />
-                  <MetricTile
-                    label="Missing GT"
-                    value={formatPercent(qcMetrics?.missing_gt_rate)}
-                    tone="warn"
-                  />
-                  <MetricTile
-                    label="Het/HomAlt"
-                    value={formatNumber(qcMetrics?.het_hom_alt_ratio)}
-                    tone="neutral"
-                  />
-                  <MetricTile
-                    label="Multi-allelic"
-                    value={formatPercent(qcMetrics?.multi_allelic_rate)}
-                    tone="neutral"
-                  />
-                  <MetricTile
-                    label="Symbolic ALT"
-                    value={formatPercent(qcMetrics?.symbolic_alt_rate)}
-                    tone="neutral"
-                  />
-                  <MetricTile label="SNV fraction" value={formatPercent(qcMetrics?.snv_fraction)} tone="good" />
-                  <MetricTile label="Indel fraction" value={formatPercent(qcMetrics?.indel_fraction)} tone="neutral" />
-                </div>
+                <StudioMetricGrid
+                  items={[
+                    { label: "PASS rate", value: formatPercent(qcMetrics?.pass_rate), tone: "good" },
+                    { label: "Ti/Tv", value: formatNumber(qcMetrics?.transition_transversion_ratio) },
+                    { label: "Missing GT", value: formatPercent(qcMetrics?.missing_gt_rate), tone: "warn" },
+                    { label: "Het/HomAlt", value: formatNumber(qcMetrics?.het_hom_alt_ratio) },
+                    { label: "Multi-allelic", value: formatPercent(qcMetrics?.multi_allelic_rate) },
+                    { label: "Symbolic ALT", value: formatPercent(qcMetrics?.symbolic_alt_rate) },
+                    { label: "SNV fraction", value: formatPercent(qcMetrics?.snv_fraction), tone: "good" },
+                    { label: "Indel fraction", value: formatPercent(qcMetrics?.indel_fraction) },
+                  ]}
+                />
                 <div className="resultSectionSplit">
                   <article className="miniCard">
                     <h3>Genotype composition</h3>
@@ -4849,16 +4882,7 @@ export default function Page() {
                 <h2>References</h2>
               </div>
               <div className="studioCanvasBody">
-                <ol className="referenceList">
-                  {analysis.references.map((item, index) => (
-                    <li key={item.id}>
-                      <span className="referenceIndex">[{index + 1}]</span>{" "}
-                      <a href={item.url} target="_blank" rel="noreferrer">
-                        {item.title}
-                      </a>
-                    </li>
-                  ))}
-                </ol>
+                <ReferenceListCard items={analysis.references} />
               </div>
             </section>
           ) : null}
