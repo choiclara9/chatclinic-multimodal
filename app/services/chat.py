@@ -719,8 +719,101 @@ def _compact_analysis_context(payload: AnalysisChatRequest) -> dict[str, object]
         context["studio_context"] = _flatten_studio_context(payload.studio_context)
     return context
 
-def _fallback_answer(payload: AnalysisChatRequest) -> AnalysisChatResponse:
-    if _has_studio_trigger(payload.question):
+def _compact_raw_qc_context(payload: RawQcChatRequest) -> dict[str, object]:
+    context = {
+        "analysis_id": payload.analysis.analysis_id,
+        "draft_answer": payload.analysis.draft_answer,
+        "facts": payload.analysis.facts.model_dump(),
+        "modules": [item.model_dump() for item in payload.analysis.modules[:12]],
+    }
+    if payload.studio_context:
+        context["studio_context"] = _flatten_studio_context(payload.studio_context)
+    return context
+
+
+def _compact_summary_stats_context(payload: SummaryStatsChatRequest) -> dict[str, object]:
+    context = {
+        "analysis_id": payload.analysis.analysis_id,
+        "file_name": payload.analysis.file_name,
+        "genome_build": payload.analysis.genome_build,
+        "trait_type": payload.analysis.trait_type,
+        "delimiter": payload.analysis.delimiter,
+        "detected_columns": payload.analysis.detected_columns,
+        "mapped_fields": payload.analysis.mapped_fields.model_dump(),
+        "row_count": payload.analysis.row_count,
+        "warnings": payload.analysis.warnings[:12],
+        "preview_rows": payload.analysis.preview_rows[:8],
+        "draft_answer": payload.analysis.draft_answer,
+        "used_tools": payload.analysis.used_tools,
+    }
+    if payload.studio_context:
+        context["studio_context"] = _flatten_studio_context(payload.studio_context)
+    return context
+
+
+CHAT_OPENAI_CONFIG: dict[str, dict[str, Any]] = {
+    "vcf": {
+        "context_label": "Analysis context JSON",
+        "compact_context_builder": _compact_analysis_context,
+        "grounded_system_prompt": (
+            "You are a genomics analysis copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer from the provided VCF analysis context and do not invent variant facts. "
+            "Treat analysis.used_tools as the authoritative record of which deterministic tools were actually run in the current analysis. "
+            "Do not claim that a tool was used unless it appears in analysis.used_tools or the user explicitly requests a new run. "
+            "Do not infer tool execution only from card names such as VEP consequence summaries. "
+            "Treat studio_context as part of the trusted analysis state, including ROH, coverage, candidate, ClinVar, and consequence summaries when present. "
+            "When possible, cite reference ids like REF1 or REF4 inline. "
+            "Format the answer in clean Markdown with short sections or bullet points when helpful. "
+            "Label the answer as analysis-grounded."
+        ),
+        "general_system_prompt": (
+            "You are a helpful general assistant. "
+            "The user did not request analysis grounding. "
+            "Answer from general knowledge only and ignore any uploaded analysis/studio context. "
+            "Do not mention analysis context, Studio cards, or uploaded-file facts unless the user explicitly asks with a grounding trigger such as $studio."
+        ),
+    },
+    "raw_qc": {
+        "context_label": "FastQC context JSON",
+        "compact_context_builder": _compact_raw_qc_context,
+        "grounded_system_prompt": (
+            "You are a sequencing QC copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer from the provided FastQC context and do not invent QC metrics. "
+            "Be concise, grounded, and practical. "
+            "If there are WARN or FAIL modules, explain why they matter for downstream genomics workflows."
+        ),
+        "general_system_prompt": (
+            "You are a helpful general assistant. "
+            "The user did not request analysis grounding. "
+            "Answer from general knowledge only and ignore any uploaded FastQC/raw-QC context unless the user explicitly asks with a grounding trigger such as $studio."
+        ),
+    },
+    "summary_stats": {
+        "context_label": "Summary statistics context JSON",
+        "compact_context_builder": _compact_summary_stats_context,
+        "grounded_system_prompt": (
+            "You are a post-GWAS and summary-statistics copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer from the provided summary statistics context. "
+            "When the answer is grounded in the uploaded file, distinguish that clearly from general knowledge. "
+            "Do not claim that a downstream tool has already been run unless it appears in used_tools."
+        ),
+        "general_system_prompt": (
+            "You are a helpful general assistant. "
+            "The user did not request analysis grounding. "
+            "Answer from general knowledge only and ignore any uploaded summary-statistics context unless the user explicitly asks with a grounding trigger such as $studio."
+        ),
+    },
+}
+
+
+def _fallback_chat_answer(
+    source_type: str,
+    question: str,
+) -> AnalysisChatResponse | RawQcChatResponse | SummaryStatsChatResponse:
+    if _has_studio_trigger(question):
         answer = (
             "I could not complete the grounded Studio response right now.\n\n"
             "- The request was recognized as `$studio` grounded chat.\n"
@@ -732,44 +825,46 @@ def _fallback_answer(payload: AnalysisChatRequest) -> AnalysisChatResponse:
             "- Please retry the question.\n"
             "- If you want the answer grounded in the current Studio state, add `$studio` to the message."
         )
-    return AnalysisChatResponse(answer=answer, citations=[], used_fallback=True)
+    return _basic_source_response(source_type, answer, used_fallback=True)
 
 
-def _call_openai(payload: AnalysisChatRequest) -> AnalysisChatResponse:
+def _extract_openai_output_text(result: dict[str, Any]) -> str:
+    output_text = result.get("output_text")
+    if output_text:
+        return str(output_text).strip()
+    output = result.get("output", [])
+    texts: list[str] = []
+    for item in output:
+        for content in item.get("content", []):
+            if content.get("type") == "output_text":
+                texts.append(content.get("text", ""))
+    return "\n".join(texts).strip()
+
+
+def _call_openai_for_source(
+    source_type: str,
+    payload: AnalysisChatRequest | RawQcChatRequest | SummaryStatsChatRequest,
+) -> AnalysisChatResponse | RawQcChatResponse | SummaryStatsChatResponse:
     api_key = os.getenv("OPENAI_API_KEY")
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     if not api_key:
-        return _fallback_answer(payload)
+        return _fallback_chat_answer(source_type, payload.question)
 
+    config = CHAT_OPENAI_CONFIG[source_type]
     grounded = _has_studio_trigger(payload.question)
     if grounded:
-        compact_context = _compact_analysis_context(payload)
-        system_prompt = (
-            "You are a genomics analysis copilot. "
-            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
-            "Answer from the provided VCF analysis context and do not invent variant facts. "
-            "Treat analysis.used_tools as the authoritative record of which deterministic tools were actually run in the current analysis. "
-            "Do not claim that a tool was used unless it appears in analysis.used_tools or the user explicitly requests a new run. "
-            "Do not infer tool execution only from card names such as VEP consequence summaries. "
-            "Treat studio_context as part of the trusted analysis state, including ROH, coverage, candidate, ClinVar, and consequence summaries when present. "
-            "When possible, cite reference ids like REF1 or REF4 inline. "
-            "Format the answer in clean Markdown with short sections or bullet points when helpful. "
-            "Label the answer as analysis-grounded."
-        )
+        compact_context = config["compact_context_builder"](payload)
+        system_prompt = str(config["grounded_system_prompt"])
         user_content = (
             "Question:\n"
             f"{payload.question}\n\n"
-            "Analysis context JSON:\n"
+            f"{config['context_label']}:\n"
             f"{json.dumps(compact_context, ensure_ascii=False)}"
         )
     else:
-        system_prompt = (
-            "You are a helpful general assistant. "
-            "The user did not request analysis grounding. "
-            "Answer from general knowledge only and ignore any uploaded analysis/studio context. "
-            "Do not mention analysis context, Studio cards, or uploaded-file facts unless the user explicitly asks with a grounding trigger such as $studio."
-        )
+        system_prompt = str(config["general_system_prompt"])
         user_content = payload.question
+
     history_lines = [{"role": turn.role, "content": turn.content} for turn in payload.history[-6:]]
     body = {
         "model": model,
@@ -791,19 +886,12 @@ def _call_openai(payload: AnalysisChatRequest) -> AnalysisChatResponse:
     with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
         result = json.loads(response.read().decode("utf-8"))
 
-    output_text = result.get("output_text")
-    if not output_text:
-        output = result.get("output", [])
-        texts: list[str] = []
-        for item in output:
-            for content in item.get("content", []):
-                if content.get("type") == "output_text":
-                    texts.append(content.get("text", ""))
-        output_text = "\n".join(texts).strip()
-
+    output_text = _extract_openai_output_text(result)
     citations = sorted(set(re.findall(r"\bREF\d+\b", output_text or "")))
-    return AnalysisChatResponse(
-        answer=output_text or _fallback_answer(payload).answer,
+    response_cls = _source_response_class(source_type)
+    fallback_answer = _fallback_chat_answer(source_type, payload.question).answer
+    return response_cls(
+        answer=output_text or fallback_answer,
         citations=citations,
         used_fallback=False,
     )
@@ -1327,18 +1415,13 @@ def answer_analysis_chat(payload: AnalysisChatRequest) -> AnalysisChatResponse:
         )
 
     try:
-        return _call_openai(payload)
+        response = _call_openai_for_source("vcf", payload)
+        assert isinstance(response, AnalysisChatResponse)
+        return response
     except Exception:
-        return _fallback_answer(payload)
-
-
-def _fallback_raw_qc_answer(payload: RawQcChatRequest) -> RawQcChatResponse:
-    answer = (
-        "I could not complete the raw-QC chat response right now.\n\n"
-        "- Please retry the question.\n"
-        "- If you want the answer grounded in the current Studio state, add `$studio` to the message."
-    )
-    return RawQcChatResponse(answer=answer, citations=[], used_fallback=True)
+        response = _fallback_chat_answer("vcf", payload.question)
+        assert isinstance(response, AnalysisChatResponse)
+        return response
 
 
 def answer_raw_qc_chat(payload: RawQcChatRequest) -> RawQcChatResponse:
@@ -1377,81 +1460,14 @@ def answer_raw_qc_chat(payload: RawQcChatRequest) -> RawQcChatResponse:
                 used_fallback=False,
             )
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-    if not api_key:
-        return _fallback_raw_qc_answer(payload)
-
-    compact_context = {
-        "analysis_id": payload.analysis.analysis_id,
-        "draft_answer": payload.analysis.draft_answer,
-        "facts": payload.analysis.facts.model_dump(),
-        "modules": [item.model_dump() for item in payload.analysis.modules[:12]],
-    }
-    grounded = _has_studio_trigger(payload.question)
-    if grounded:
-        system_prompt = (
-            "You are a sequencing QC copilot. "
-            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
-            "Answer from the provided FastQC context and do not invent QC metrics. "
-            "Be concise, grounded, and practical. "
-            "If there are WARN or FAIL modules, explain why they matter for downstream genomics workflows."
-        )
-        user_content = (
-            "Question:\n"
-            f"{payload.question}\n\n"
-            "FastQC context JSON:\n"
-            f"{json.dumps(compact_context, ensure_ascii=False)}"
-        )
-    else:
-        system_prompt = (
-            "You are a helpful general assistant. "
-            "The user did not request analysis grounding. "
-            "Answer from general knowledge only and ignore any uploaded FastQC/raw-QC context unless the user explicitly asks with a grounding trigger such as $studio."
-        )
-        user_content = payload.question
-    history_lines = [{"role": turn.role, "content": turn.content} for turn in payload.history[-6:]]
-    body = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            *history_lines,
-            {"role": "user", "content": user_content},
-        ],
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        output_text = result.get("output_text")
-        if not output_text:
-            output = result.get("output", [])
-            texts: list[str] = []
-            for item in output:
-                for content in item.get("content", []):
-                    if content.get("type") == "output_text":
-                        texts.append(content.get("text", ""))
-            output_text = "\n".join(texts).strip()
-        return RawQcChatResponse(answer=output_text or _fallback_raw_qc_answer(payload).answer, citations=[], used_fallback=False)
+        response = _call_openai_for_source("raw_qc", payload)
+        assert isinstance(response, RawQcChatResponse)
+        return response
     except Exception:
-        return _fallback_raw_qc_answer(payload)
-
-
-def _fallback_summary_stats_answer(payload: SummaryStatsChatRequest) -> SummaryStatsChatResponse:
-    answer = (
-        "I could not complete the summary-statistics chat response right now.\n\n"
-        "- Please retry the question.\n"
-        "- If you want the answer grounded in the current Studio state, add `$studio` to the message."
-    )
-    return SummaryStatsChatResponse(answer=answer, citations=[], used_fallback=True)
+        response = _fallback_chat_answer("raw_qc", payload.question)
+        assert isinstance(response, RawQcChatResponse)
+        return response
 
 
 def answer_summary_stats_chat(payload: SummaryStatsChatRequest) -> SummaryStatsChatResponse:
@@ -1490,82 +1506,11 @@ def answer_summary_stats_chat(payload: SummaryStatsChatRequest) -> SummaryStatsC
                 used_fallback=True,
             )
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
-    if not api_key:
-        return _fallback_summary_stats_answer(payload)
-
-    compact_context = {
-        "analysis_id": payload.analysis.analysis_id,
-        "file_name": payload.analysis.file_name,
-        "genome_build": payload.analysis.genome_build,
-        "trait_type": payload.analysis.trait_type,
-        "delimiter": payload.analysis.delimiter,
-        "detected_columns": payload.analysis.detected_columns,
-        "mapped_fields": payload.analysis.mapped_fields.model_dump(),
-        "row_count": payload.analysis.row_count,
-        "warnings": payload.analysis.warnings[:12],
-        "preview_rows": payload.analysis.preview_rows[:8],
-        "draft_answer": payload.analysis.draft_answer,
-        "used_tools": payload.analysis.used_tools,
-    }
-    grounded = _has_studio_trigger(payload.question)
-    if grounded:
-        system_prompt = (
-            "You are a post-GWAS and summary-statistics copilot. "
-            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
-            "Answer from the provided summary statistics context. "
-            "When the answer is grounded in the uploaded file, distinguish that clearly from general knowledge. "
-            "Do not claim that a downstream tool has already been run unless it appears in used_tools."
-        )
-        user_content = (
-            "Question:\n"
-            f"{payload.question}\n\n"
-            "Summary statistics context JSON:\n"
-            f"{json.dumps(compact_context, ensure_ascii=False)}"
-        )
-    else:
-        system_prompt = (
-            "You are a helpful general assistant. "
-            "The user did not request analysis grounding. "
-            "Answer from general knowledge only and ignore any uploaded summary-statistics context unless the user explicitly asks with a grounding trigger such as $studio."
-        )
-        user_content = payload.question
-    history_lines = [{"role": turn.role, "content": turn.content} for turn in payload.history[-6:]]
-    body = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            *history_lines,
-            {"role": "user", "content": user_content},
-        ],
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-    )
     try:
-        with urllib.request.urlopen(request, timeout=OPENAI_TIMEOUT_SECONDS) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        output_text = result.get("output_text")
-        if not output_text:
-            output = result.get("output", [])
-            texts: list[str] = []
-            for item in output:
-                for content in item.get("content", []):
-                    if content.get("type") == "output_text":
-                        texts.append(content.get("text", ""))
-            output_text = "\n".join(texts).strip()
-        citations = sorted(set(re.findall(r"\bREF\d+\b", output_text or "")))
-        return SummaryStatsChatResponse(
-            answer=output_text or _fallback_summary_stats_answer(payload).answer,
-            citations=citations,
-            used_fallback=False,
-        )
+        response = _call_openai_for_source("summary_stats", payload)
+        assert isinstance(response, SummaryStatsChatResponse)
+        return response
     except Exception:
-        return _fallback_summary_stats_answer(payload)
+        response = _fallback_chat_answer("summary_stats", payload.question)
+        assert isinstance(response, SummaryStatsChatResponse)
+        return response
