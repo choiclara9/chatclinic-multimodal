@@ -6,10 +6,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from app.models import AnalysisResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, TextSourceResponse
+from app.models import AnalysisResponse, DicomSourceResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, TextSourceResponse
 from app.services.source_registry import source_response_metadata
 from app.services.workflows import (
     analyze_raw_qc_workflow,
+    analyze_dicom_workflow,
     analyze_spreadsheet_workflow,
     analyze_summary_stats_workflow,
     analyze_text_workflow,
@@ -60,6 +61,7 @@ def persist_uploaded_source_bytes(source_type: str, file_name: str, data: bytes)
 BOOTSTRAP_RUNNERS: dict[str, Any] = {
     "vcf": analyze_vcf_workflow,
     "raw_qc": analyze_raw_qc_workflow,
+    "dicom": analyze_dicom_workflow,
     "spreadsheet": analyze_spreadsheet_workflow,
     "summary_stats": analyze_summary_stats_workflow,
     "text": analyze_text_workflow,
@@ -71,7 +73,7 @@ def run_bootstrap_analysis(
     source_path: str,
     file_name: str,
     **kwargs: Any,
-) -> AnalysisResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
     manifest = load_bootstrap_manifest(source_type)
     if manifest is None:
         raise ValueError(f"No bootstrap manifest is registered for source type: {source_type}")
@@ -96,6 +98,9 @@ def run_bootstrap_analysis(
             genome_build=kwargs.get("genome_build", "unknown"),
             trait_type=kwargs.get("trait_type", "unknown"),
         )
+        return result.model_copy(update=source_response_metadata(source_type))
+    if source_type == "dicom":
+        result = runner(source_path, file_name)
         return result.model_copy(update=source_response_metadata(source_type))
     if source_type == "spreadsheet":
         result = runner(source_path, file_name)

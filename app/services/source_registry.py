@@ -5,6 +5,27 @@ from pathlib import Path
 
 
 SOURCE_REGISTRY: dict[str, dict[str, object]] = {
+    "dicom": {
+        "upload_label": "DICOM file",
+        "dedicated_upload_detail": "Only DICOM uploads such as .dcm and .dicom are supported.",
+        "bootstrap_source_type": "dicom",
+        "chat_response_kind": "dicom",
+        "default_result_kind": "dicom_analysis",
+        "default_requested_view": "dicom_review",
+        "studio_renderer": "dicom_review",
+        "studio_card_kind": "dicom_browser",
+        "studio_preview_kind": "image_preview",
+        "workflow_names": ["dicom_review"],
+        "capabilities": ["source_upload", "bootstrap_analysis", "workflow", "grounded_chat"],
+        "suffixes": [
+            ".dcm",
+            ".dicom",
+        ],
+        "file_kind_map": {
+            ".dcm": "DICOM",
+            ".dicom": "DICOM",
+        },
+    },
     "spreadsheet": {
         "upload_label": "spreadsheet workbook",
         "dedicated_upload_detail": "Only Excel workbook uploads such as .xlsx and .xlsm are supported.",

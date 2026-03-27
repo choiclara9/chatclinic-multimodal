@@ -196,6 +196,86 @@ function CohortBrowserCard({
   );
 }
 
+function DicomReviewCard({
+  analysis,
+  components,
+  helpers,
+}: {
+  analysis: any;
+  components: StudioRendererBuilderArgs["components"];
+  helpers: StudioRendererBuilderArgs["helpers"];
+}) {
+  const { StudioMetricGrid, StudioSimpleList, WarningListCard } = components;
+  const { formatNumber } = helpers;
+  const metadata = Array.isArray(analysis?.metadata_items) ? analysis.metadata_items[0] ?? null : null;
+  const preview = metadata?.preview ?? analysis?.artifacts?.dicom_review?.preview ?? null;
+  const series = Array.isArray(analysis?.series) ? analysis.series : [];
+
+  return (
+    <section className="notebookPanel studioCanvasPanel">
+      <div className="notebookHeader">
+        <h2>DICOM Review</h2>
+        <span className="pill">{analysis?.file_name ?? "dicom"}</span>
+      </div>
+      <div className="studioCanvasBody">
+        <StudioMetricGrid
+          items={[
+            { label: "Modality", value: String(metadata?.modality ?? "n/a"), tone: "good" },
+            { label: "Patient", value: String(metadata?.patient_id ?? "n/a"), tone: "neutral" },
+            { label: "Rows", value: String(metadata?.rows ?? "n/a"), tone: "neutral" },
+            { label: "Columns", value: String(metadata?.columns ?? "n/a"), tone: "neutral" },
+            { label: "Instance", value: String(metadata?.instance_number ?? "n/a"), tone: "neutral" },
+            { label: "Series", value: String(series.length), tone: "good" },
+          ]}
+        />
+        {preview?.available && preview?.image_data_url ? (
+          <article className="miniCard">
+            <h3>Preview</h3>
+            <div style={{ display: "flex", justifyContent: "center" }}>
+              <img
+                src={String(preview.image_data_url)}
+                alt="DICOM preview"
+                style={{ maxWidth: "100%", maxHeight: "28rem", borderRadius: "1rem", objectFit: "contain" }}
+              />
+            </div>
+          </article>
+        ) : null}
+        <div className="resultSectionSplit">
+          <article className="miniCard">
+            <h3>Metadata</h3>
+            <StudioSimpleList
+              items={[
+                { label: "Study", detail: String(metadata?.study_description ?? "not available") },
+                { label: "Series", detail: String(metadata?.series_description ?? "not available") },
+                { label: "Study UID", detail: String(metadata?.study_instance_uid ?? "not available") },
+                { label: "Series UID", detail: String(metadata?.series_instance_uid ?? "not available") },
+                { label: "File", detail: String(metadata?.file_name ?? analysis?.file_name ?? "not available") },
+              ]}
+            />
+          </article>
+          <article className="miniCard">
+            <h3>Series summary</h3>
+            <StudioSimpleList
+              items={series.map((item: any) => ({
+                label: String(item.series_description ?? item.modality ?? "Series"),
+                detail: `${item.modality ?? "unknown"} | ${item.instance_count ?? 0} instance(s)`,
+              }))}
+              emptyLabel="No series summary is available."
+            />
+          </article>
+        </div>
+        <WarningListCard
+          warnings={[
+            ...(Array.isArray(analysis?.warnings) ? analysis.warnings : []),
+            ...(!preview?.available && preview?.message ? [String(preview.message)] : []),
+          ]}
+          emptyLabel="No DICOM warnings."
+        />
+      </div>
+    </section>
+  );
+}
+
 export function buildCustomStudioRendererRegistry({
   activeStudioView,
   apiBase,
@@ -209,6 +289,7 @@ export function buildCustomStudioRendererRegistry({
   plinkRunning,
   activeSource,
   attachedFile,
+  dicomAnalysis,
   spreadsheetAnalysis,
   candidateVariants,
   searchedAnnotations,
@@ -241,6 +322,10 @@ export function buildCustomStudioRendererRegistry({
   const { summarizeLabel } = helpers;
 
   return {
+    dicom_review: () =>
+      dicomAnalysis ? (
+        <DicomReviewCard analysis={dicomAnalysis} components={components} helpers={helpers} />
+      ) : null,
     cohort_browser: () =>
       spreadsheetAnalysis ? (
         <CohortBrowserCard activeView={activeStudioView} analysis={spreadsheetAnalysis} components={components} helpers={helpers} />

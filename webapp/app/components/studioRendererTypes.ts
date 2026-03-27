@@ -10,6 +10,7 @@ export type StudioRendererBuilderArgs = {
   analysis: any;
   rawQcAnalysis: any;
   summaryStatsAnalysis: any;
+  dicomAnalysis: any;
   spreadsheetAnalysis: any;
   textAnalysis: any;
   prsPrepResultForStudio: any;

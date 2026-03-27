@@ -411,6 +411,31 @@ type SpreadsheetChatResponse = {
   analysis?: SpreadsheetSourceResponse | null;
 };
 
+type DicomSourceResponse = {
+  analysis_id: string;
+  source_dicom_path?: string | null;
+  file_name: string;
+  file_kind: string;
+  metadata_items: Array<Record<string, any>>;
+  series: Array<Record<string, any>>;
+  studio_cards: Array<Record<string, any>>;
+  artifacts: Record<string, any>;
+  warnings: string[];
+  draft_answer: string;
+  used_tools: string[];
+  tool_registry: AnalysisResponse["tool_registry"];
+};
+
+type DicomChatResponse = {
+  answer: string;
+  citations: string[];
+  used_fallback: boolean;
+  result_kind?: string | null;
+  requested_view?: StudioView | null;
+  studio?: { renderer?: string | null } | null;
+  analysis?: DicomSourceResponse | null;
+};
+
 type RPlotResponse = {
   tool: string;
   input_path: string;
@@ -469,13 +494,13 @@ type WorkflowManifest = {
 };
 
 type SourceReadyResponse = {
-  source_type: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet";
+  source_type: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom";
   file_name: string;
   source_path: string;
   file_kind?: string | null;
 };
 
-type SessionMode = "prs" | "vcf_analysis" | "raw_sequence" | "text_review" | "spreadsheet_review";
+type SessionMode = "prs" | "vcf_analysis" | "raw_sequence" | "text_review" | "spreadsheet_review" | "imaging_review";
 
 type PrsPrepResponse = {
   analysis_id: string;
@@ -543,6 +568,12 @@ const DEFAULT_WORKFLOW_REGISTRY: WorkflowManifest[] = [
     source_type: "spreadsheet",
     default_view: "cohort_browser",
   },
+  {
+    name: "dicom_review",
+    description: "Run the default DICOM metadata and preview review workflow on the active DICOM source.",
+    source_type: "dicom",
+    default_view: "dicom_review",
+  },
 ];
 
 const DEFAULT_LIFTOVER_CHAIN =
@@ -562,6 +593,7 @@ type AnalysisQuestionTurn = {
 };
 
 type StudioView =
+  | "dicom_review"
   | "text"
   | "cohort_browser"
   | `sheet::${string}::cohort_browser`
@@ -670,6 +702,11 @@ function isTextFileName(fileName: string) {
 function isSpreadsheetFileName(fileName: string) {
   const lowered = fileName.toLowerCase();
   return lowered.endsWith(".xlsx") || lowered.endsWith(".xlsm");
+}
+
+function isDicomFileName(fileName: string) {
+  const lowered = fileName.toLowerCase();
+  return lowered.endsWith(".dcm") || lowered.endsWith(".dicom");
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -1230,19 +1267,20 @@ export default function Page() {
     {
       role: "assistant",
       content:
-        "Select a session mode first. `@mode prs` starts the PRS workflow and expects two inputs: summary statistics and a target genotype. `@mode vcf_analysis` starts a single-input VCF variant interpretation session. `@mode raw_sequence` starts a FASTQ/BAM/SAM raw sequencing QC session. `@mode text_review` starts a text-note review session. `@mode spreadsheet_review` starts a multi-sheet workbook cohort review session. To see the available modes again, enter `@mode help`.",
+        "Select a session mode first. `@mode prs` starts the PRS workflow and expects two inputs: summary statistics and a target genotype. `@mode vcf_analysis` starts a single-input VCF variant interpretation session. `@mode raw_sequence` starts a FASTQ/BAM/SAM raw sequencing QC session. `@mode text_review` starts a text-note review session. `@mode spreadsheet_review` starts a multi-sheet workbook cohort review session. `@mode imaging_review` starts a DICOM imaging review session. To see the available modes again, enter `@mode help`.",
     },
   ]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
   const [rawQcAnalysis, setRawQcAnalysis] = useState<RawQcResponse | null>(null);
   const [summaryStatsAnalysis, setSummaryStatsAnalysis] = useState<SummaryStatsResponse | null>(null);
+  const [dicomAnalysis, setDicomAnalysis] = useState<DicomSourceResponse | null>(null);
   const [spreadsheetAnalysis, setSpreadsheetAnalysis] = useState<SpreadsheetSourceResponse | null>(null);
   const [textAnalysis, setTextAnalysis] = useState<TextSourceResponse | null>(null);
   const [summaryStatsGridRows, setSummaryStatsGridRows] = useState<Array<Record<string, string>>>([]);
   const [summaryStatsHasMore, setSummaryStatsHasMore] = useState(false);
   const [summaryStatsRowsLoading, setSummaryStatsRowsLoading] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | null>(null);
+  const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | null>(null);
   const [activeSource, setActiveSource] = useState<SourceReadyResponse | null>(null);
   const [sessionMode, setSessionMode] = useState<SessionMode | null>(null);
   const [pendingUploadRole, setPendingUploadRole] = useState<"default" | "prs_summary" | "prs_target">("default");
@@ -1293,6 +1331,8 @@ export default function Page() {
         ? rawQcAnalysis.tool_registry
         : summaryStatsAnalysis?.tool_registry?.length
           ? summaryStatsAnalysis.tool_registry
+        : dicomAnalysis?.tool_registry?.length
+          ? dicomAnalysis.tool_registry
         : spreadsheetAnalysis?.tool_registry?.length
           ? spreadsheetAnalysis.tool_registry
         : textAnalysis?.tool_registry?.length
@@ -1307,15 +1347,17 @@ export default function Page() {
           ? "vcf"
           : rawQcAnalysis
             ? "raw_qc"
-            : summaryStatsAnalysis
-              ? "summary_stats"
+              : summaryStatsAnalysis
+                ? "summary_stats"
+              : dicomAnalysis
+                ? "dicom"
               : spreadsheetAnalysis
                 ? "spreadsheet"
               : textAnalysis
                 ? "text"
               : attachedSourceType;
     return sourceType ? registry.filter((item) => item.source_type === sourceType) : registry;
-  }, [workflowRegistry, analysis, rawQcAnalysis, summaryStatsAnalysis, spreadsheetAnalysis, textAnalysis, attachedSourceType, sessionMode]);
+  }, [workflowRegistry, analysis, rawQcAnalysis, summaryStatsAnalysis, dicomAnalysis, spreadsheetAnalysis, textAnalysis, attachedSourceType, sessionMode]);
 
   const hasAttachedSource = Boolean(attachedFile || prsSummaryFile || prsTargetFile);
 
@@ -1506,7 +1548,7 @@ export default function Page() {
     fileInputRef.current?.click();
   }
 
-  function workflowHelpText(sourceType: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | null) {
+  function workflowHelpText(sourceType: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | null) {
     const registry = workflowRegistry.length ? workflowRegistry : DEFAULT_WORKFLOW_REGISTRY;
     const filtered = registry.filter((item) => !sourceType || item.source_type === sourceType);
     if (filtered.length === 0) {
@@ -1553,6 +1595,7 @@ export default function Page() {
       "- `@mode raw_sequence`: raw sequencing QC workflow with one FASTQ/BAM/SAM source.",
       "- `@mode text_review`: plain-text or markdown review workflow with one text source.",
       "- `@mode spreadsheet_review`: multi-sheet Excel workbook review workflow with one spreadsheet source.",
+      "- `@mode imaging_review`: DICOM metadata and preview workflow with one DICOM source.",
     ].join("\n");
   }
 
@@ -1603,6 +1646,16 @@ export default function Page() {
         "- Open the Studio cohort browser card to inspect sheets, schema, subjects, and missingness",
       ].join("\n");
     }
+    if (mode === "imaging_review") {
+      return [
+        "**Imaging review mode**",
+        "",
+        "This session expects one DICOM source:",
+        "- Upload one `.dcm` or `.dicom` file",
+        "- Run `@skill dicom_review`",
+        "- Open the Studio DICOM Review card to inspect metadata and preview state",
+      ].join("\n");
+    }
     return [
       "**Raw sequencing mode**",
       "",
@@ -1644,6 +1697,8 @@ export default function Page() {
     const guessedSourceType =
       isRawQcFileName(file.name)
         ? "raw_qc"
+        : isDicomFileName(file.name)
+          ? "dicom"
         : isSpreadsheetFileName(file.name)
           ? "spreadsheet"
         : isTextFileName(file.name)
@@ -1657,6 +1712,8 @@ export default function Page() {
     setStatus(
       guessedSourceType === "spreadsheet"
         ? "Uploading spreadsheet source..."
+        : guessedSourceType === "dicom"
+          ? "Uploading DICOM source..."
         : guessedSourceType === "text"
           ? "Uploading text source..."
           : guessedSourceType === "summary_stats"
@@ -1670,6 +1727,7 @@ export default function Page() {
       setDirectQqmanResult(null);
       setDirectPrsPrepResult(null);
       setLatestPrsPrepResult(null);
+      setDicomAnalysis(null);
       setSpreadsheetAnalysis(null);
       setTextAnalysis(null);
     } else if (sessionMode === "prs" && slotRole === "prs_target") {
@@ -1678,6 +1736,7 @@ export default function Page() {
       setDirectPlinkResult(null);
       setDirectSnpeffResult(null);
       setDirectLdblockshowResult(null);
+      setDicomAnalysis(null);
       setSpreadsheetAnalysis(null);
       setTextAnalysis(null);
     } else if (guessedSourceType === "vcf") {
@@ -1686,11 +1745,13 @@ export default function Page() {
       setDirectPlinkResult(null);
       setDirectSnpeffResult(null);
       setDirectLdblockshowResult(null);
+      setDicomAnalysis(null);
       setSpreadsheetAnalysis(null);
       setTextAnalysis(null);
     } else if (guessedSourceType === "raw_qc") {
       setRawQcAnalysis(null);
       setDirectSamtoolsResult(null);
+      setDicomAnalysis(null);
       setSpreadsheetAnalysis(null);
       setTextAnalysis(null);
     } else if (guessedSourceType === "summary_stats") {
@@ -1698,12 +1759,22 @@ export default function Page() {
       setDirectQqmanResult(null);
       setDirectPrsPrepResult(null);
       setLatestPrsPrepResult(null);
+      setDicomAnalysis(null);
+      setSpreadsheetAnalysis(null);
+      setTextAnalysis(null);
+    } else if (guessedSourceType === "dicom") {
+      setAnalysis(null);
+      setRawQcAnalysis(null);
+      setSummaryStatsAnalysis(null);
+      setDicomAnalysis(null);
       setSpreadsheetAnalysis(null);
       setTextAnalysis(null);
     } else if (guessedSourceType === "spreadsheet") {
+      setDicomAnalysis(null);
       setSpreadsheetAnalysis(null);
       setTextAnalysis(null);
     } else if (guessedSourceType === "text") {
+      setDicomAnalysis(null);
       setTextAnalysis(null);
     }
     setFollowUpAnswer(null);
@@ -1761,6 +1832,12 @@ export default function Page() {
       addMessage({
         role: "assistant",
         content: `Raw sequencing source \`${file.name}\` is loaded. Run \`@skill raw_qc_review\` to start the default review workflow, or \`@skill help\` to see available workflows.`,
+      });
+    } else if (guessedSourceType === "dicom") {
+      setStatus("DICOM source ready");
+      addMessage({
+        role: "assistant",
+        content: `DICOM source \`${file.name}\` is loaded. Run \`@skill dicom_review\` to start the default imaging review workflow, or \`@skill help\` to see available workflows.`,
       });
     } else if (guessedSourceType === "text") {
       setStatus("Text source ready");
@@ -2269,6 +2346,56 @@ export default function Page() {
     }
   }
 
+  async function handleStartDicomReview(
+    file: File,
+    options?: { silent?: boolean },
+  ): Promise<DicomSourceResponse | null> {
+    const silent = options?.silent ?? false;
+    setError(null);
+    setStatus("Running DICOM review...");
+    if (!silent) {
+      addMessage({
+        role: "assistant",
+        content: "DICOM 파일을 읽고 metadata, preview, series summary를 만들고 있습니다.",
+        kind: "status",
+      });
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/dicom/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const payload: DicomSourceResponse = await response.json();
+      setDicomAnalysis(payload);
+      setSpreadsheetAnalysis(null);
+      setTextAnalysis(null);
+      setAnalysis(null);
+      setRawQcAnalysis(null);
+      setSummaryStatsAnalysis(null);
+      activateStudioFromPayload(payload, "dicom_review");
+      setStatus("DICOM review ready");
+      setComposerText("");
+      return payload;
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setError(message);
+      setStatus("DICOM review failed");
+      addMessage({
+        role: "assistant",
+        content: `DICOM review 중 오류가 발생했습니다: ${message}`,
+      });
+      return null;
+    }
+  }
+
   async function handleStartSpreadsheetReview(
     file: File,
     options?: { silent?: boolean },
@@ -2528,6 +2655,12 @@ export default function Page() {
         addMessage({ role: "assistant", content: modeSelectionText("spreadsheet_review") });
         return;
       }
+      if (remainder === "imaging_review") {
+        setSessionMode("imaging_review");
+        setStatus("Imaging review mode selected");
+        addMessage({ role: "assistant", content: modeSelectionText("imaging_review") });
+        return;
+      }
       addMessage({ role: "assistant", content: `\`@mode ${remainder}\` is not available. Use \`@mode help\`.` });
       return;
     }
@@ -2536,13 +2669,13 @@ export default function Page() {
       addMessage({ role: "user", content: text });
       addMessage({
         role: "assistant",
-        content: sessionMode ? "먼저 현재 mode에 필요한 source 파일을 업로드해 주세요." : "먼저 `@mode prs`, `@mode vcf_analysis`, `@mode raw_sequence`, `@mode text_review`, 또는 `@mode spreadsheet_review`를 선택한 뒤 source 파일을 업로드해 주세요.",
+        content: sessionMode ? "먼저 현재 mode에 필요한 source 파일을 업로드해 주세요." : "먼저 `@mode prs`, `@mode vcf_analysis`, `@mode raw_sequence`, `@mode text_review`, `@mode spreadsheet_review`, 또는 `@mode imaging_review`를 선택한 뒤 source 파일을 업로드해 주세요.",
       });
       setComposerText("");
       return;
     }
 
-    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !spreadsheetAnalysis && !textAnalysis) {
+    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis) {
       const skillMatch = text.match(/^@skill(?:\s+(.*))?$/i);
       if (skillMatch) {
         addMessage({ role: "user", content: text });
@@ -2597,6 +2730,14 @@ export default function Page() {
             return;
           }
           await handleStartTextReview(attachedFile);
+          return;
+        }
+        if (workflowName === "dicom_review" && (sessionMode === "imaging_review" || attachedSourceType === "dicom")) {
+          if (!attachedFile) {
+            addMessage({ role: "assistant", content: "Upload a DICOM source first." });
+            return;
+          }
+          await handleStartDicomReview(attachedFile);
           return;
         }
         if (workflowName === "spreadsheet_review" && (sessionMode === "spreadsheet_review" || attachedSourceType === "spreadsheet")) {
@@ -2669,6 +2810,8 @@ export default function Page() {
             ? "PRS mode is active. Upload the summary-statistics and target-genotype sources as needed, then use `@skill prs_prep` and `@plink score`."
             : sessionMode === "text_review"
               ? "Text review mode is active. Upload a text source and run `@skill text_review`."
+              : sessionMode === "imaging_review"
+                ? "Imaging review mode is active. Upload a DICOM source and run `@skill dicom_review`."
               : sessionMode === "spreadsheet_review"
                 ? "Spreadsheet review mode is active. Upload a workbook source and run `@skill spreadsheet_review`."
             : "A source is loaded, but no workflow is running yet. Use `@skill help` to see available workflows, then run one such as `@skill representative_vcf_review`.",
@@ -2697,6 +2840,12 @@ export default function Page() {
     if (textAnalysis) {
       setComposerText("");
       await handleAskTextQuestion(text);
+      return;
+    }
+
+    if (dicomAnalysis) {
+      setComposerText("");
+      await handleAskDicomQuestion(text);
       return;
     }
 
@@ -3042,6 +3191,48 @@ export default function Page() {
     }
   }
 
+  async function handleAskDicomQuestion(questionText?: string, analysisOverride?: DicomSourceResponse | null) {
+    const text = questionText?.trim() ?? "";
+    const activeAnalysis = analysisOverride ?? dicomAnalysis;
+    if (!text || !activeAnalysis) {
+      return;
+    }
+
+    setStatus("Generating answer...");
+    setAnalysisQa((current) => [...current, { role: "user", content: text }]);
+
+    try {
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/chat/dicom`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: text,
+          analysis: activeAnalysis,
+          history: analysisQa.map((turn) => ({ role: turn.role, content: turn.content })),
+          studio_context: studioContext,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload: DicomChatResponse = await response.json();
+      if (payload.analysis) {
+        setDicomAnalysis(payload.analysis);
+      }
+      activateStudioFromPayload(payload, "dicom_review");
+      setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
+      setFollowUpAnswer(payload.answer);
+      setStatus("Answer ready");
+    } catch (caught) {
+      const msg = caught instanceof Error ? caught.message : String(caught);
+      setAnalysisQa((current) => [
+        ...current,
+        { role: "assistant", content: `설명 요청 중 오류가 발생했습니다: ${msg}` },
+      ]);
+      setStatus("Answer failed");
+    }
+  }
+
   async function handleAskSpreadsheetQuestion(questionText?: string, analysisOverride?: SpreadsheetSourceResponse | null) {
     const text = questionText?.trim() ?? "";
     const activeAnalysis = analysisOverride ?? spreadsheetAnalysis;
@@ -3111,13 +3302,15 @@ export default function Page() {
       ? rawQcAnalysis.draft_answer
       : summaryStatsAnalysis
         ? summaryStatsAnalysis.draft_answer
+      : dicomAnalysis
+        ? dicomAnalysis.draft_answer
       : spreadsheetAnalysis
         ? spreadsheetAnalysis.draft_answer
       : textAnalysis
         ? textAnalysis.draft_answer
       : null;
   const displayedAnswer = followUpAnswer ?? summaryText;
-  const hasInteractiveState = Boolean(attachedFile || analysis || rawQcAnalysis || summaryStatsAnalysis || spreadsheetAnalysis || textAnalysis || messages.length > 1);
+  const hasInteractiveState = Boolean(attachedFile || analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || messages.length > 1);
   const latestStatusMessage =
     [...messages].reverse().find((message) => message.kind === "status" || message.kind === "summary")?.content ?? "";
   const sourceStatusDetail = useMemo(() => {
@@ -3138,6 +3331,12 @@ export default function Page() {
     }
     if (status === "Text review ready") {
       return "The uploaded text note has been summarized into a preview-oriented Studio review card.";
+    }
+    if (status === "Uploading DICOM source...") {
+      return "The DICOM source is being uploaded and prepared for metadata and preview review.";
+    }
+    if (status === "Running DICOM review...") {
+      return "The DICOM upload is complete. ChatGenome is extracting metadata, preview state, and series summary.";
     }
     if (status === "Uploading spreadsheet source...") {
       return "The workbook is being uploaded and prepared for sheet-level cohort review.";
@@ -3160,8 +3359,14 @@ export default function Page() {
     if (status === "Spreadsheet source ready") {
       return "A workbook source is attached. Run the spreadsheet review workflow to build cohort-style Studio cards.";
     }
+    if (status === "DICOM source ready") {
+      return "A DICOM source is attached. Run the DICOM review workflow to build imaging Studio cards.";
+    }
     if (status === "Spreadsheet review ready") {
       return "The uploaded workbook has been converted into sheet-level cohort browser artifacts in Studio.";
+    }
+    if (status === "DICOM review ready") {
+      return "The uploaded DICOM file has been converted into metadata, preview, and series review artifacts in Studio.";
     }
     if (status === "Running Liftover...") {
       return "Running GATK LiftoverVcf on the active VCF and preparing lifted and rejected variant outputs.";
@@ -3223,6 +3428,9 @@ export default function Page() {
     if (status === "Spreadsheet review failed") {
       return "Spreadsheet intake failed. Check the workbook format and whether the required parser dependency is installed.";
     }
+    if (status === "DICOM review failed") {
+      return "DICOM intake failed. Check the file validity and preview dependencies such as pydicom, numpy, and Pillow.";
+    }
     if (status === "Answer failed") {
       return "The last chat response failed. Retry the question and ChatGenome will attempt the grounded explanation again.";
     }
@@ -3254,7 +3462,9 @@ export default function Page() {
     status === "Preparing analysis..." ||
     status === "Analyzing" ||
     status === "Uploading spreadsheet source..." ||
+    status === "Uploading DICOM source..." ||
     status === "Running spreadsheet review..." ||
+    status === "Running DICOM review..." ||
     status === "Uploading text source..." ||
     status === "Uploading summary statistics source..." ||
     status === "Uploading raw sequencing source..." ||
@@ -3271,6 +3481,7 @@ export default function Page() {
     status === "Raw QC failed" ||
     status === "Summary stats failed" ||
     status === "Spreadsheet review failed" ||
+    status === "DICOM review failed" ||
     status === "Answer failed" ||
     status === "Liftover failed" ||
     status === "qqman failed" ||
@@ -3287,19 +3498,23 @@ export default function Page() {
     status === "PLINK ready" ||
     status === "PLINK score ready"
       ? status
-      : analysis || rawQcAnalysis || summaryStatsAnalysis
+      : analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis
         ? analysis
           ? "Analysis ready"
           : rawQcAnalysis
             ? "Raw QC ready"
             : summaryStatsAnalysis
               ? "Summary stats ready"
-              : spreadsheetAnalysis
-                ? "Spreadsheet review ready"
-                : "Analysis ready"
+              : dicomAnalysis
+                ? "DICOM review ready"
+                : spreadsheetAnalysis
+                  ? "Spreadsheet review ready"
+                  : textAnalysis
+                    ? "Text review ready"
+                    : "Analysis ready"
         : status;
   const summaryTurn =
-    analysis || rawQcAnalysis || summaryStatsAnalysis || spreadsheetAnalysis
+    analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis
       ? [
           {
             role: "assistant" as const,
@@ -3527,6 +3742,7 @@ export default function Page() {
       rawQcAnalysis ||
       summaryStatsAnalysis ||
       spreadsheetAnalysis ||
+      dicomAnalysis ||
       textAnalysis ||
       prsPrepResultForStudio ||
       qqmanResultForStudio ||
@@ -3563,6 +3779,16 @@ export default function Page() {
               }))
             : [{ id: "cohort_browser" as StudioView, title: "Cohort Browser", subtitle: "Sheet-level cohort overview and grid preview" }]
         )
+    : dicomAnalysis
+      ? [
+          ...(dicomAnalysis.studio_cards?.length
+            ? dicomAnalysis.studio_cards.map((card) => ({
+                id: String(card.id ?? "dicom_review") as StudioView,
+                title: String(card.title ?? "DICOM Review"),
+                subtitle: String(card.subtitle ?? "Metadata, preview, and series summary"),
+              }))
+            : [{ id: "dicom_review" as StudioView, title: "DICOM Review", subtitle: "Metadata, preview, and series summary" }])
+        ]
     : textAnalysis
       ? [
           { id: "text" as StudioView, title: "Text Review", subtitle: "Preview and note-length summary" },
@@ -3620,6 +3846,7 @@ export default function Page() {
     analysis,
     rawQcAnalysis,
     summaryStatsAnalysis,
+    dicomAnalysis,
     spreadsheetAnalysis,
     textAnalysis,
     prsPrepResultForStudio,
@@ -3702,6 +3929,36 @@ export default function Page() {
     }
   }
   const studioContext = useMemo(() => {
+    if (dicomAnalysis) {
+      const dicomCard = dicomAnalysis.artifacts?.dicom_review ?? null;
+      const metadata = Array.isArray(dicomAnalysis.metadata_items) ? dicomAnalysis.metadata_items[0] ?? null : null;
+      const preview = metadata?.preview ?? dicomCard?.preview ?? null;
+      return {
+        active_view: activeStudioView,
+        current_card: dicomCard,
+        current_summary: metadata
+          ? {
+              modality: metadata.modality ?? null,
+              patient_id: metadata.patient_id ?? null,
+              study_description: metadata.study_description ?? null,
+              series_description: metadata.series_description ?? null,
+            }
+          : null,
+        current_schema: [],
+        current_preview: preview
+          ? {
+              columns: ["preview_state"],
+              rows: [{ preview_state: String(preview.available ? "available" : preview.message ?? "not available") }],
+            }
+          : null,
+        current_warnings: Array.isArray(dicomAnalysis.warnings) ? dicomAnalysis.warnings.slice(0, 12) : [],
+        extra: {
+          metadata_items: dicomAnalysis.metadata_items,
+          series: dicomAnalysis.series,
+          preview,
+        },
+      };
+    }
     if (spreadsheetAnalysis) {
       const selectedSpreadsheetSheet =
         typeof activeStudioView === "string" && activeStudioView.startsWith("sheet::") && activeStudioView.endsWith("::cohort_browser")
@@ -3911,6 +4168,7 @@ export default function Page() {
   }, [
     activeStudioView,
     analysis,
+    dicomAnalysis,
     spreadsheetAnalysis,
     candidateVariants,
     clinicalCoverage,
@@ -4006,6 +4264,8 @@ export default function Page() {
                               ? "Active raw sequencing source"
                               : isSpreadsheetFileName(attachedFile.name)
                                 ? "Active spreadsheet source"
+                              : isDicomFileName(attachedFile.name)
+                                ? "Active DICOM source"
                               : isTextFileName(attachedFile.name)
                                 ? "Active text source"
                               : isSummaryStatsFileName(attachedFile.name) && !isVcfFileName(attachedFile.name)
@@ -4017,7 +4277,7 @@ export default function Page() {
                       </article>
                     ) : (
                       <div className="sourceEmpty">
-                        <p>Select a session mode with `@mode prs`, `@mode vcf_analysis`, `@mode raw_sequence`, `@mode text_review`, or `@mode spreadsheet_review`.</p>
+                        <p>Select a session mode with `@mode prs`, `@mode vcf_analysis`, `@mode raw_sequence`, `@mode text_review`, `@mode spreadsheet_review`, or `@mode imaging_review`.</p>
                       </div>
                     )}
                   </div>
@@ -4121,7 +4381,7 @@ export default function Page() {
               ) : (
                 <div className="chatEmptyState">
                   <h3>Select a mode first</h3>
-                  <p>Use <code>@mode prs</code>, <code>@mode vcf_analysis</code>, <code>@mode raw_sequence</code>, <code>@mode text_review</code>, or <code>@mode spreadsheet_review</code>, then upload the required source files on the left.</p>
+                  <p>Use <code>@mode prs</code>, <code>@mode vcf_analysis</code>, <code>@mode raw_sequence</code>, <code>@mode text_review</code>, <code>@mode spreadsheet_review</code>, or <code>@mode imaging_review</code>, then upload the required source files on the left.</p>
                 </div>
               )}
             </div>
@@ -4138,7 +4398,7 @@ export default function Page() {
                     ? "Start typing a follow-up question..."
                     : sessionMode
                     ? "Upload the required source files for the selected mode"
-                      : "Use @mode prs, @mode vcf_analysis, @mode raw_sequence, @mode text_review, or @mode spreadsheet_review first"
+                      : "Use @mode prs, @mode vcf_analysis, @mode raw_sequence, @mode text_review, @mode spreadsheet_review, or @mode imaging_review first"
                 }
                 onKeyDown={(event) => {
                   if (isComposing || event.nativeEvent.isComposing) {

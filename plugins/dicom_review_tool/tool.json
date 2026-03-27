@@ -1,0 +1,24 @@
+{
+  "name": "dicom_review_tool",
+  "entrypoint": "plugins.dicom_review_tool.logic:execute",
+  "description": "Build DICOM review artifacts including metadata, preview state, and single-series summary.",
+  "task": "dicom_review",
+  "modality": "medical-image",
+  "source": "plugin",
+  "workflow_binding": {
+    "source_type": "dicom",
+    "input_map": {
+      "dicom_path": "$analysis.source_dicom_path",
+      "file_name": "$analysis.file_name"
+    },
+    "result_path": "analysis"
+  },
+  "direct_chat": {
+    "response_kind": "dicom_chat",
+    "result_kind": "dicom_analysis",
+    "requested_view": "dicom_review",
+    "studio": {
+      "renderer": "dicom_review"
+    }
+  }
+}

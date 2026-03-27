@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
-from app.models import AnalysisResponse, PrsPrepResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, SymbolicAltSummary, TextSourceResponse, ToolInfo
+from app.models import AnalysisResponse, DicomSourceResponse, PrsPrepResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, SymbolicAltSummary, TextSourceResponse, ToolInfo
 from app.services.tool_runner import discover_tools, run_tool
 from app.services.workflow_fallbacks import compute_vcf_fallback_value
 from app.services.workflow_hooks import (
@@ -17,6 +17,7 @@ from app.services.workflow_hooks import (
 from app.services.workflow_responses import (
     assemble_analysis_response_from_vcf_context,
     build_analysis_workflow_result,
+    build_dicom_workflow_result,
     build_raw_qc_workflow_result,
     build_spreadsheet_workflow_result,
     build_summary_stats_workflow_result,
@@ -25,6 +26,7 @@ from app.services.workflow_responses import (
 from app.services.workflow_transforms import transform_bound_value
 from plugins.fastqc_execution_tool.logic import FASTQC_OUTPUT_DIR
 from plugins.cohort_sheet_browser_tool.logic import analyze_spreadsheet_source
+from plugins.dicom_review_tool.logic import analyze_dicom_source
 from plugins.prs_prep_tool.logic import analyze_prs_prep
 from plugins.summary_stats_review_tool.logic import analyze_summary_stats
 from plugins.text_review_tool.logic import analyze_text_source
@@ -454,6 +456,54 @@ def _run_registered_spreadsheet_workflow_from_manifest(
     return build_spreadsheet_workflow_result(manifest, context)
 
 
+def _dicom_workflow_context(
+    analysis: DicomSourceResponse,
+) -> dict[str, Any]:
+    return {
+        "source_dicom_path": analysis.source_dicom_path,
+        "file_name": analysis.file_name,
+        "analysis": analysis,
+    }
+
+
+def _run_dicom_workflow_step(step: dict[str, Any], context: dict[str, Any]) -> None:
+    tool_name = str(step.get("tool") or "").strip()
+    bind_name = str(step.get("bind") or "").strip()
+    needs = [str(item).strip() for item in step.get("needs", []) if str(item).strip()]
+
+    for need in needs:
+        value = context.get(need)
+        if value in (None, "", []):
+            raise RuntimeError(f"DICOM workflow step `{tool_name}` is missing required context `{need}`.")
+    binding = _workflow_binding_for_tool(tool_name, source_type="dicom")
+    if binding is None:
+        raise NotImplementedError(f"Unsupported DICOM workflow step tool: {tool_name}")
+    payload = _build_tool_payload_from_binding(binding, context)
+    result = run_tool(tool_name, payload)
+    value = _extract_tool_result_value(result, binding)
+    transformed_value = transform_bound_value(str(binding.get("transform") or "identity"), value)
+    context[bind_name] = transformed_value
+    used_tools_label = str(binding.get("used_tools_label") or tool_name).strip()
+    analysis_obj = context.get("analysis")
+    if used_tools_label and isinstance(analysis_obj, DicomSourceResponse):
+        analysis_obj.used_tools.append(used_tools_label)
+
+
+def _run_registered_dicom_workflow_from_manifest(
+    analysis: DicomSourceResponse,
+    manifest: dict[str, object],
+) -> dict[str, object]:
+    context = _dicom_workflow_context(analysis)
+    steps = manifest.get("steps")
+    if not isinstance(steps, list):
+        raise ValueError(f"Workflow {manifest.get('name')} does not define a valid step list.")
+    for step in steps:
+        if not isinstance(step, dict):
+            raise ValueError(f"Workflow {manifest.get('name')} contains a non-object step.")
+        _run_dicom_workflow_step(step, context)
+    return build_dicom_workflow_result(manifest, context)
+
+
 def _raw_qc_workflow_context(
     analysis: RawQcResponse,
 ) -> dict[str, Any]:
@@ -621,6 +671,13 @@ def analyze_spreadsheet_workflow(path: str, original_name: str) -> SpreadsheetSo
     return result
 
 
+def analyze_dicom_workflow(path: str, original_name: str) -> DicomSourceResponse:
+    result = analyze_dicom_source(path, original_name)
+    result.analysis_id = str(uuid.uuid4())
+    result.tool_registry = discover_tools()
+    return result
+
+
 def analyze_prs_prep_workflow(
     path: str,
     original_name: str,
@@ -689,3 +746,23 @@ def run_registered_spreadsheet_workflow(
         )
 
     return _run_registered_spreadsheet_workflow_from_manifest(analysis, manifest)
+
+
+def run_registered_dicom_workflow(
+    workflow_name: str,
+    analysis: DicomSourceResponse,
+) -> dict[str, object]:
+    manifest = load_workflow_manifest(workflow_name)
+    if manifest is None:
+        raise ValueError(f"Unknown DICOM workflow: {workflow_name}")
+    source_type = str(manifest.get("source_type") or "").strip().lower()
+    if source_type != "dicom":
+        raise ValueError(f"Workflow {workflow_name} is not registered for DICOM sources.")
+
+    requires = [str(item).strip() for item in manifest.get("requires", []) if str(item).strip()]
+    if "source_dicom_path" in requires and not analysis.source_dicom_path:
+        raise RuntimeError(
+            "The active DICOM session does not expose a durable source file path, so this workflow cannot be rerun from chat."
+        )
+
+    return _run_registered_dicom_workflow_from_manifest(analysis, manifest)

@@ -6,6 +6,7 @@ from typing import Any
 from app.models import (
     AnalysisFacts,
     AnalysisResponse,
+    DicomSourceResponse,
     PrsPrepResponse,
     RawQcResponse,
     SpreadsheetSourceResponse,
@@ -92,6 +93,8 @@ def workflow_answer_tokens(
         "kept_rows": 0,
         "dropped_rows": 0,
         "build_check": "",
+        "modality": "",
+        "series_count": 0,
     }
 
     if source_type == "vcf" and isinstance(analysis, AnalysisResponse):
@@ -159,6 +162,18 @@ def workflow_answer_tokens(
                 "logged_tools": _stringify_logged_tools(getattr(analysis, "used_tools", []) or []),
                 "sheet_count": analysis.sheet_count,
                 "selected_sheet": analysis.selected_sheet or "",
+            }
+        )
+        return tokens
+
+    if source_type == "dicom" and isinstance(analysis, DicomSourceResponse):
+        first_item = analysis.metadata_items[0] if analysis.metadata_items else {}
+        tokens.update(
+            {
+                "active_file": analysis.file_name,
+                "logged_tools": _stringify_logged_tools(getattr(analysis, "used_tools", []) or []),
+                "modality": str(first_item.get("modality") or "not available"),
+                "series_count": len(analysis.series or []),
             }
         )
         return tokens
@@ -254,6 +269,21 @@ def build_spreadsheet_workflow_result(
     refreshed: SpreadsheetSourceResponse = context["analysis"]
     requested_view = str(manifest.get("requested_view") or "cohort_browser")
     answer = format_workflow_answer(manifest, "spreadsheet", refreshed, context)
+    return {
+        "answer": answer,
+        "analysis": refreshed,
+        "requested_view": requested_view,
+        "studio": workflow_studio_metadata(manifest),
+    }
+
+
+def build_dicom_workflow_result(
+    manifest: dict[str, object],
+    context: dict[str, Any],
+) -> dict[str, object]:
+    refreshed: DicomSourceResponse = context["analysis"]
+    requested_view = str(manifest.get("requested_view") or "dicom_review")
+    answer = format_workflow_answer(manifest, "dicom", refreshed, context)
     return {
         "answer": answer,
         "analysis": refreshed,

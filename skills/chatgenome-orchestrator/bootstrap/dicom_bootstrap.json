@@ -1,0 +1,6 @@
+{
+  "name": "dicom_bootstrap",
+  "source_type": "dicom",
+  "runner": "dicom",
+  "upload_subdir": "dicom"
+}

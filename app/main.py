@@ -15,6 +15,9 @@ from app.models import (
     AnalysisChatResponse,
     AnalysisJobResponse,
     AnalysisResponse,
+    DicomChatRequest,
+    DicomChatResponse,
+    DicomSourceResponse,
     GatkLiftoverVcfRequest,
     GatkLiftoverVcfResponse,
     LDBlockShowRequest,
@@ -61,6 +64,7 @@ from app.models import (
 )
 from app.services.chat import (
     answer_analysis_chat,
+    answer_dicom_chat,
     answer_raw_qc_chat,
     answer_source_chat,
     answer_spreadsheet_chat,
@@ -267,7 +271,7 @@ def _resolve_source_upload(filename: str, expected_source_type: str | None = Non
             raise HTTPException(status_code=400, detail=detail or "Unsupported upload type.")
         raise HTTPException(
             status_code=400,
-            detail="Unsupported source type. Upload a VCF, raw sequencing file, summary statistics file, spreadsheet workbook, or registered text note.",
+            detail="Unsupported source type. Upload a VCF, raw sequencing file, summary statistics file, spreadsheet workbook, registered text note, or DICOM file.",
         )
     source_type, _, _ = detected
     if expected_source_type is not None and source_type != expected_source_type:
@@ -281,7 +285,7 @@ def _run_source_bootstrap(
     durable_path: Path,
     file_name: str,
     **kwargs: object,
-) -> AnalysisResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
     bootstrap_source_type = source_bootstrap_type(source_type)
     if load_bootstrap_manifest(bootstrap_source_type) is None:
         raise HTTPException(status_code=500, detail=f"The {source_type} bootstrap manifest is not available.")
@@ -299,6 +303,7 @@ def _run_source_bootstrap(
             "summary_stats": "Summary statistics intake",
             "spreadsheet": "Spreadsheet intake",
             "text": "Text intake",
+            "dicom": "DICOM intake",
         }.get(source_type, "Bootstrap analysis")
         raise HTTPException(status_code=400, detail=f"{label} failed: {exc}") from exc
 
@@ -308,7 +313,7 @@ def _persist_and_bootstrap_upload(
     file_name: str,
     data: bytes,
     **kwargs: object,
-) -> AnalysisResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
     bootstrap_source_type = source_bootstrap_type(source_type)
     durable_path = persist_uploaded_source_bytes(bootstrap_source_type, file_name, data)
     return _run_source_bootstrap(source_type, durable_path, file_name, **kwargs)
@@ -416,7 +421,7 @@ def _resolve_source_path_request(request: SourceFromPathRequest) -> tuple[str, P
 
 def _analyze_registered_source_path(
     request: SourceFromPathRequest,
-) -> AnalysisResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
     source_type, source_path, file_name = _resolve_source_path_request(request)
     return _run_source_bootstrap(
         source_type,
@@ -533,11 +538,11 @@ def analyze_from_path_async(request: FromPathRequest) -> AnalysisJobResponse:
 
 @app.post(
     "/api/v1/source/from-path",
-    response_model=Union[AnalysisResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, TextSourceResponse],
+    response_model=Union[AnalysisResponse, DicomSourceResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, TextSourceResponse],
 )
 def analyze_registered_source_from_path(
     request: SourceFromPathRequest,
-) -> AnalysisResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse:
     try:
         return _analyze_registered_source_path(request)
     except FileNotFoundError as exc:
@@ -594,6 +599,11 @@ def chat_about_summary_stats(request: SummaryStatsChatRequest) -> SummaryStatsCh
 @app.post("/api/v1/chat/text", response_model=TextChatResponse)
 def chat_about_text(request: TextChatRequest) -> TextChatResponse:
     return answer_text_chat(request)
+
+
+@app.post("/api/v1/chat/dicom", response_model=DicomChatResponse)
+def chat_about_dicom(request: DicomChatRequest) -> DicomChatResponse:
+    return answer_dicom_chat(request)
 
 
 @app.post("/api/v1/chat/spreadsheet", response_model=SpreadsheetChatResponse)
@@ -730,6 +740,18 @@ async def analyze_spreadsheet_upload(file: UploadFile = File(...)) -> Spreadshee
         await file.read(),
         SpreadsheetSourceResponse,
         "Unexpected bootstrap response type for spreadsheet upload.",
+    )
+
+
+@app.post("/api/v1/dicom/upload", response_model=DicomSourceResponse)
+async def analyze_dicom_upload(file: UploadFile = File(...)) -> DicomSourceResponse:
+    filename = file.filename or "image.dcm"
+    return _typed_bootstrap_upload(
+        "dicom",
+        filename,
+        await file.read(),
+        DicomSourceResponse,
+        "Unexpected bootstrap response type for DICOM upload.",
     )
 
 

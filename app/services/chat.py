@@ -10,6 +10,9 @@ from app.models import (
     AnalysisResponse,
     AnalysisChatRequest,
     AnalysisChatResponse,
+    DicomChatRequest,
+    DicomChatResponse,
+    DicomSourceResponse,
     QqmanAssociationRequest,
     RawQcResponse,
     RawQcChatRequest,
@@ -47,6 +50,7 @@ from app.services.workflows import (
     run_registered_analysis_workflow,
     list_workflow_manifests,
     load_workflow_manifest,
+    run_registered_dicom_workflow,
     run_registered_raw_qc_workflow,
     run_registered_spreadsheet_workflow,
     run_registered_summary_stats_workflow,
@@ -243,6 +247,8 @@ def _describe_source_type(source_type: str) -> str:
         return "text-note session"
     if normalized == "spreadsheet":
         return "spreadsheet session"
+    if normalized == "dicom":
+        return "DICOM imaging session"
     return "current session"
 
 
@@ -258,6 +264,8 @@ def _tool_input_hint(source_type: str) -> str:
         return "active text source"
     if normalized == "spreadsheet":
         return "active spreadsheet source"
+    if normalized == "dicom":
+        return "active DICOM source"
     return "active source"
 
 
@@ -300,7 +308,7 @@ def _unknown_tool_answer(tool_request: dict[str, object] | None) -> str:
     return f"`@{alias}` is not a registered ChatGenome tool."
 
 
-def _source_response_class(source_type: str) -> type[AnalysisChatResponse] | type[RawQcChatResponse] | type[SpreadsheetChatResponse] | type[SummaryStatsChatResponse] | type[TextChatResponse]:
+def _source_response_class(source_type: str) -> type[AnalysisChatResponse] | type[DicomChatResponse] | type[RawQcChatResponse] | type[SpreadsheetChatResponse] | type[SummaryStatsChatResponse] | type[TextChatResponse]:
     normalized = source_type.strip().lower()
     if normalized == "vcf":
         return AnalysisChatResponse
@@ -308,6 +316,8 @@ def _source_response_class(source_type: str) -> type[AnalysisChatResponse] | typ
         return RawQcChatResponse
     if normalized == "summary_stats":
         return SummaryStatsChatResponse
+    if normalized == "dicom":
+        return DicomChatResponse
     if normalized == "text":
         return TextChatResponse
     if normalized == "spreadsheet":
@@ -320,7 +330,7 @@ def _basic_source_response(
     answer: str,
     *,
     used_fallback: bool = False,
-) -> AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
+) -> AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     response_cls = _source_response_class(source_type)
     return response_cls(source_type=source_type, answer=answer, citations=[], used_fallback=used_fallback)
 
@@ -328,7 +338,7 @@ def _basic_source_response(
 def _unknown_workflow_response(
     source_type: str,
     skill_request: dict[str, object],
-) -> AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
+) -> AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     name = str(skill_request.get("name") or "workflow")
     return _basic_source_response(
         source_type,
@@ -393,6 +403,18 @@ def _workflow_template_context(source_type: str, workflow_name: str, workflow_re
                 "selected_sheet": getattr(analysis, "selected_sheet", "unknown"),
             }
         )
+    elif source == "dicom":
+        analysis = workflow_result.get("analysis")
+        metadata_items = getattr(analysis, "metadata_items", []) or []
+        first_item = metadata_items[0] if metadata_items else {}
+        context.update(
+            {
+                "active_file": getattr(analysis, "file_name", "unknown"),
+                "logged_tools": ", ".join(getattr(analysis, "used_tools", []) or []) or "none",
+                "modality": getattr(first_item, "get", lambda *_: "unknown")("modality"),
+                "series_count": len(getattr(analysis, "series", []) or []),
+            }
+        )
     return context
 
 
@@ -417,6 +439,8 @@ def _run_registered_workflow_for_source(source_type: str, workflow_name: str, an
         return run_registered_raw_qc_workflow(workflow_name, analysis)
     if source == "summary_stats":
         return run_registered_summary_stats_workflow(workflow_name, analysis)
+    if source == "dicom":
+        return run_registered_dicom_workflow(workflow_name, analysis)
     if source == "text":
         return run_registered_text_workflow(workflow_name, analysis)
     if source == "spreadsheet":
@@ -426,7 +450,7 @@ def _run_registered_workflow_for_source(source_type: str, workflow_name: str, an
 
 def _assemble_workflow_chat_response(
     manifest: dict[str, object], workflow_result: dict[str, object]
-) -> AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
+) -> AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     response_kind = str(manifest.get("response_kind") or "").strip().lower()
     requested_view = str(workflow_result.get("requested_view") or manifest.get("requested_view") or "").strip() or None
     studio = workflow_result.get("studio")
@@ -461,6 +485,16 @@ def _assemble_workflow_chat_response(
             requested_view=requested_view,
             analysis=workflow_result.get("analysis"),
             prs_prep_result=workflow_result.get("prs_prep_result"),
+        )
+    if response_kind == "dicom_chat":
+        return DicomChatResponse(
+            source_type="dicom",
+            answer=answer,
+            citations=[],
+            used_fallback=False,
+            studio=studio,
+            requested_view=requested_view,
+            analysis=workflow_result.get("analysis"),
         )
     if response_kind == "text_chat":
         return TextChatResponse(
@@ -671,6 +705,8 @@ def _render_skill_help(source_type: str | None = None, selected: dict[str, objec
         lines.append("- `@skill text_review`")
     elif source_type == "spreadsheet":
         lines.append("- `@skill spreadsheet_review`")
+    elif source_type == "dicom":
+        lines.append("- `@skill dicom_review`")
     else:
         lines.append("- `@skill help`")
         lines.append("- `@skill representative_vcf_review`")
@@ -729,7 +765,7 @@ def _flatten_studio_context(studio_context: dict) -> dict[str, object]:
 
 def _serialize_source_chat_response(
     source_type: str,
-    response: AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse,
+    response: AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse,
 ) -> SourceChatResponse:
     data = response.model_dump(exclude_none=True)
     artifact_payload: dict[str, Any] = {}
@@ -791,6 +827,16 @@ def answer_source_chat(payload: SourceChatRequest) -> SourceChatResponse:
             )
         )
         return _serialize_source_chat_response("summary_stats", response)
+    if source_type == "dicom":
+        response = answer_dicom_chat(
+            DicomChatRequest(
+                question=payload.question,
+                analysis=DicomSourceResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("dicom", response)
     if source_type == "text":
         response = answer_text_chat(
             TextChatRequest(
@@ -977,6 +1023,28 @@ def _compact_summary_stats_context(payload: SummaryStatsChatRequest) -> dict[str
     return context
 
 
+def _compact_dicom_context(payload: DicomChatRequest) -> dict[str, object]:
+    first_item = payload.analysis.metadata_items[0] if payload.analysis.metadata_items else {}
+    context = {
+        "analysis_id": payload.analysis.analysis_id,
+        "file_name": payload.analysis.file_name,
+        "file_kind": payload.analysis.file_kind,
+        "modality": first_item.get("modality"),
+        "patient_id": first_item.get("patient_id"),
+        "study_description": first_item.get("study_description"),
+        "series_description": first_item.get("series_description"),
+        "rows": first_item.get("rows"),
+        "columns": first_item.get("columns"),
+        "series_count": len(payload.analysis.series),
+        "warnings": payload.analysis.warnings[:12],
+        "draft_answer": payload.analysis.draft_answer,
+        "used_tools": payload.analysis.used_tools,
+    }
+    if payload.studio_context:
+        context["studio_context"] = _flatten_studio_context(payload.studio_context)
+    return context
+
+
 def _compact_text_context(payload: TextChatRequest) -> dict[str, object]:
     context = {
         "analysis_id": payload.analysis.analysis_id,
@@ -1067,6 +1135,22 @@ CHAT_OPENAI_CONFIG: dict[str, dict[str, Any]] = {
             "Answer from general knowledge only and ignore any uploaded summary-statistics context unless the user explicitly asks with a grounding trigger such as $studio."
         ),
     },
+    "dicom": {
+        "context_label": "DICOM review context JSON",
+        "compact_context_builder": _compact_dicom_context,
+        "grounded_system_prompt": (
+            "You are a DICOM imaging review copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer only from the provided DICOM metadata, preview state, and current Studio card context. "
+            "Do not invent pixel findings or diagnoses that are not present in the provided context. "
+            "Be explicit when the answer is based only on metadata or preview state."
+        ),
+        "general_system_prompt": (
+            "You are a helpful general assistant. "
+            "The user did not request grounded DICOM reasoning. "
+            "Answer from general knowledge only and ignore any uploaded DICOM context unless the user explicitly asks with a grounding trigger such as $studio."
+        ),
+    },
     "text": {
         "context_label": "Text-note context JSON",
         "compact_context_builder": _compact_text_context,
@@ -1103,7 +1187,7 @@ CHAT_OPENAI_CONFIG: dict[str, dict[str, Any]] = {
 def _fallback_chat_answer(
     source_type: str,
     question: str,
-) -> AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
+) -> AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     if _has_studio_trigger(question):
         answer = (
             "I could not complete the grounded Studio response right now.\n\n"
@@ -1134,8 +1218,8 @@ def _extract_openai_output_text(result: dict[str, Any]) -> str:
 
 def _call_openai_for_source(
     source_type: str,
-    payload: AnalysisChatRequest | RawQcChatRequest | SpreadsheetChatRequest | SummaryStatsChatRequest | TextChatRequest,
-) -> AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
+    payload: AnalysisChatRequest | DicomChatRequest | RawQcChatRequest | SpreadsheetChatRequest | SummaryStatsChatRequest | TextChatRequest,
+) -> AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     api_key = os.getenv("OPENAI_API_KEY")
     model = os.getenv("OPENAI_MODEL", "gpt-5-mini")
     if not api_key:
@@ -1852,6 +1936,55 @@ def answer_text_chat(payload: TextChatRequest) -> TextChatResponse:
     except Exception:
         response = _fallback_chat_answer("text", payload.question)
         assert isinstance(response, TextChatResponse)
+        return response
+
+
+def answer_dicom_chat(payload: DicomChatRequest) -> DicomChatResponse:
+    if _needs_grounded_clarification(payload.question):
+        return DicomChatResponse(
+            source_type="dicom",
+            answer=_grounded_clarification_text(),
+            citations=[],
+            used_fallback=False,
+        )
+
+    skill_request = _parse_skill_request(payload.question)
+    if skill_request:
+        try:
+            response = _handle_skill_request_for_source("dicom", payload, skill_request)
+            assert isinstance(response, DicomChatResponse)
+            return response
+        except Exception as exc:
+            name = str(skill_request.get("name") or "workflow")
+            return DicomChatResponse(
+                source_type="dicom",
+                answer=f"`@skill {name}` execution failed: {exc}",
+                citations=[],
+                used_fallback=True,
+            )
+
+    at_tool_request = _parse_at_tool_request(payload.question)
+    if at_tool_request:
+        try:
+            response = _handle_at_tool_request_for_source("dicom", payload, at_tool_request)
+            assert isinstance(response, DicomChatResponse)
+            return response
+        except Exception as exc:
+            alias = str(at_tool_request.get("alias") or "tool")
+            return DicomChatResponse(
+                source_type="dicom",
+                answer=f"`@{alias}` execution failed: {exc}",
+                citations=[],
+                used_fallback=True,
+            )
+
+    try:
+        response = _call_openai_for_source("dicom", payload)
+        assert isinstance(response, DicomChatResponse)
+        return response
+    except Exception:
+        response = _fallback_chat_answer("dicom", payload.question)
+        assert isinstance(response, DicomChatResponse)
         return response
 
 
