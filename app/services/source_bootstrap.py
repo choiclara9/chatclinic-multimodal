@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models import AnalysisResponse, RawQcResponse, SpreadsheetSourceResponse, SummaryStatsResponse, TextSourceResponse
+from app.services.source_registry import source_response_metadata
 from app.services.workflows import (
     analyze_raw_qc_workflow,
     analyze_spreadsheet_workflow,
@@ -79,22 +80,27 @@ def run_bootstrap_analysis(
     if runner is None:
         raise NotImplementedError(f"No bootstrap runner is registered for source type: {source_type}")
     if source_type == "vcf":
-        return runner(
+        result = runner(
             source_path,
             annotation_scope=kwargs.get("annotation_scope", "representative"),
             annotation_limit=kwargs.get("annotation_limit"),
         )
+        return result.model_copy(update=source_response_metadata(source_type))
     if source_type == "raw_qc":
-        return runner(source_path, file_name)
+        result = runner(source_path, file_name)
+        return result.model_copy(update=source_response_metadata(source_type))
     if source_type == "summary_stats":
-        return runner(
+        result = runner(
             source_path,
             file_name,
             genome_build=kwargs.get("genome_build", "unknown"),
             trait_type=kwargs.get("trait_type", "unknown"),
         )
+        return result.model_copy(update=source_response_metadata(source_type))
     if source_type == "spreadsheet":
-        return runner(source_path, file_name)
+        result = runner(source_path, file_name)
+        return result.model_copy(update=source_response_metadata(source_type))
     if source_type == "text":
-        return runner(source_path, file_name)
+        result = runner(source_path, file_name)
+        return result.model_copy(update=source_response_metadata(source_type))
     raise NotImplementedError(f"Unsupported bootstrap source type: {source_type}")

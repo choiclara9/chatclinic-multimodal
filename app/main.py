@@ -40,6 +40,8 @@ from app.models import (
     SnpEffResponse,
     SamtoolsRequest,
     SamtoolsResponse,
+    SourceChatRequest,
+    SourceChatResponse,
     SourceReadyResponse,
     SummaryStatsRowsRequest,
     SummaryStatsRowsResponse,
@@ -57,7 +59,14 @@ from app.models import (
     WorkflowReplyRequest,
     WorkflowStartRequest,
 )
-from app.services.chat import answer_analysis_chat, answer_raw_qc_chat, answer_spreadsheet_chat, answer_summary_stats_chat, answer_text_chat
+from app.services.chat import (
+    answer_analysis_chat,
+    answer_raw_qc_chat,
+    answer_source_chat,
+    answer_spreadsheet_chat,
+    answer_summary_stats_chat,
+    answer_text_chat,
+)
 from app.services.jobs import create_job, get_job, run_job
 from app.services.source_bootstrap import (
     UPLOAD_ROOT,
@@ -560,6 +569,11 @@ def get_analysis_job(job_id: str) -> AnalysisJobResponse:
         result=parsed_result,
         error=job["error"],
     )
+
+
+@app.post("/api/v1/source/chat", response_model=SourceChatResponse)
+def chat_about_registered_source(request: SourceChatRequest) -> SourceChatResponse:
+    return answer_source_chat(request)
 
 
 @app.post("/api/v1/chat/analysis", response_model=AnalysisChatResponse)

@@ -7,15 +7,23 @@ import urllib.request
 from typing import Any
 
 from app.models import (
+    AnalysisResponse,
     AnalysisChatRequest,
     AnalysisChatResponse,
     QqmanAssociationRequest,
+    RawQcResponse,
     RawQcChatRequest,
     RawQcChatResponse,
+    SourceChatRequest,
+    SourceChatResponse,
     SpreadsheetChatRequest,
     SpreadsheetChatResponse,
+    SpreadsheetSourceResponse,
+    StudioContextPayload,
+    SummaryStatsResponse,
     SummaryStatsChatRequest,
     SummaryStatsChatResponse,
+    TextSourceResponse,
     TextChatRequest,
     TextChatResponse,
 )
@@ -314,7 +322,7 @@ def _basic_source_response(
     used_fallback: bool = False,
 ) -> AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     response_cls = _source_response_class(source_type)
-    return response_cls(answer=answer, citations=[], used_fallback=used_fallback)
+    return response_cls(source_type=source_type, answer=answer, citations=[], used_fallback=used_fallback)
 
 
 def _unknown_workflow_response(
@@ -445,6 +453,7 @@ def _assemble_workflow_chat_response(
         )
     if response_kind == "summary_stats_chat":
         return SummaryStatsChatResponse(
+            source_type="summary_stats",
             answer=answer,
             citations=[],
             used_fallback=False,
@@ -455,6 +464,7 @@ def _assemble_workflow_chat_response(
         )
     if response_kind == "text_chat":
         return TextChatResponse(
+            source_type="text",
             answer=answer,
             citations=[],
             used_fallback=False,
@@ -464,6 +474,7 @@ def _assemble_workflow_chat_response(
         )
     if response_kind == "spreadsheet_chat":
         return SpreadsheetChatResponse(
+            source_type="spreadsheet",
             answer=answer,
             citations=[],
             used_fallback=False,
@@ -499,6 +510,7 @@ def _analysis_tool_response(
         **_with_result_field(
             result_kind,
             result,
+            source_type="vcf",
             answer=answer,
             citations=citations or [],
             used_fallback=used_fallback,
@@ -525,6 +537,7 @@ def _raw_qc_tool_response(
         **_with_result_field(
             result_kind,
             result,
+            source_type="raw_qc",
             answer=answer,
             citations=citations or [],
             used_fallback=used_fallback,
@@ -550,6 +563,7 @@ def _summary_stats_tool_response(
         **_with_result_field(
             result_kind,
             result,
+            source_type="summary_stats",
             answer=answer,
             citations=citations or [],
             used_fallback=used_fallback,
@@ -575,6 +589,7 @@ def _text_tool_response(
         **_with_result_field(
             result_kind,
             result,
+            source_type="text",
             answer=answer,
             citations=citations or [],
             used_fallback=used_fallback,
@@ -678,6 +693,10 @@ def _is_korean(text: str) -> bool:
 
 
 def _flatten_studio_context(studio_context: dict) -> dict[str, object]:
+    if isinstance(studio_context, StudioContextPayload):
+        base = studio_context.model_dump(exclude_none=True)
+        extra = getattr(studio_context, "model_extra", None) or {}
+        studio_context = {**base, **extra}
     flattened = {
         "active_view": studio_context.get("active_view"),
         "qc_summary": studio_context.get("qc_summary"),
@@ -691,6 +710,12 @@ def _flatten_studio_context(studio_context: dict) -> dict[str, object]:
         "selected_annotation": studio_context.get("selected_annotation"),
     }
     for key in (
+        "current_card",
+        "current_summary",
+        "current_schema",
+        "current_preview",
+        "current_warnings",
+        "extra",
         "sheet_count",
         "selected_sheet",
         "sheet_names",
@@ -700,6 +725,93 @@ def _flatten_studio_context(studio_context: dict) -> dict[str, object]:
         if key in studio_context:
             flattened[key] = studio_context.get(key)
     return flattened
+
+
+def _serialize_source_chat_response(
+    source_type: str,
+    response: AnalysisChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse,
+) -> SourceChatResponse:
+    data = response.model_dump(exclude_none=True)
+    artifact_payload: dict[str, Any] = {}
+    analysis_payload = data.pop("analysis", None)
+    for key in (
+        "plink_result",
+        "liftover_result",
+        "ldblockshow_result",
+        "samtools_result",
+        "qqman_result",
+        "prs_prep_result",
+    ):
+        value = data.pop(key, None)
+        if value is not None:
+            artifact_payload[key] = value
+    return SourceChatResponse(
+        source_type=source_type,  # type: ignore[arg-type]
+        answer=str(data.get("answer") or ""),
+        citations=list(data.get("citations") or []),
+        used_fallback=bool(data.get("used_fallback")),
+        result_kind=data.get("result_kind"),
+        requested_view=data.get("requested_view"),
+        studio=data.get("studio"),
+        analysis_payload=analysis_payload if isinstance(analysis_payload, dict) else None,
+        artifact_payload=artifact_payload,
+    )
+
+
+def answer_source_chat(payload: SourceChatRequest) -> SourceChatResponse:
+    studio_context = StudioContextPayload(**payload.studio_context.model_dump(exclude_none=True), **(getattr(payload.studio_context, "model_extra", None) or {}))
+    source_type = payload.source_type
+    if source_type == "vcf":
+        response = answer_analysis_chat(
+            AnalysisChatRequest(
+                question=payload.question,
+                analysis=AnalysisResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("vcf", response)
+    if source_type == "raw_qc":
+        response = answer_raw_qc_chat(
+            RawQcChatRequest(
+                question=payload.question,
+                analysis=RawQcResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("raw_qc", response)
+    if source_type == "summary_stats":
+        response = answer_summary_stats_chat(
+            SummaryStatsChatRequest(
+                question=payload.question,
+                analysis=SummaryStatsResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("summary_stats", response)
+    if source_type == "text":
+        response = answer_text_chat(
+            TextChatRequest(
+                question=payload.question,
+                analysis=TextSourceResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("text", response)
+    if source_type == "spreadsheet":
+        response = answer_spreadsheet_chat(
+            SpreadsheetChatRequest(
+                question=payload.question,
+                analysis=SpreadsheetSourceResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("spreadsheet", response)
+    raise NotImplementedError(f"Unsupported source chat type: {source_type}")
 
 
 def _has_studio_trigger(question: str) -> bool:
@@ -1746,6 +1858,7 @@ def answer_text_chat(payload: TextChatRequest) -> TextChatResponse:
 def answer_spreadsheet_chat(payload: SpreadsheetChatRequest) -> SpreadsheetChatResponse:
     if _needs_grounded_clarification(payload.question):
         return SpreadsheetChatResponse(
+            source_type="spreadsheet",
             answer=_grounded_clarification_text(),
             citations=[],
             used_fallback=False,
@@ -1760,6 +1873,7 @@ def answer_spreadsheet_chat(payload: SpreadsheetChatRequest) -> SpreadsheetChatR
         except Exception as exc:
             name = str(skill_request.get("name") or "workflow")
             return SpreadsheetChatResponse(
+                source_type="spreadsheet",
                 answer=f"`@skill {name}` execution failed: {exc}",
                 citations=[],
                 used_fallback=True,
@@ -1774,6 +1888,7 @@ def answer_spreadsheet_chat(payload: SpreadsheetChatRequest) -> SpreadsheetChatR
         except Exception as exc:
             alias = str(at_tool_request.get("alias") or "tool")
             return SpreadsheetChatResponse(
+                source_type="spreadsheet",
                 answer=f"`@{alias}` execution failed: {exc}",
                 citations=[],
                 used_fallback=True,

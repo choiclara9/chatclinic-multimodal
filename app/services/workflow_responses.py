@@ -15,6 +15,7 @@ from app.models import (
 from app.services.annotation import build_ui_cards
 from app.services.recommendation import build_recommendations
 from app.services.references import build_reference_bundle
+from app.services.source_registry import source_response_metadata
 
 
 class _SafeFormatDict(dict[str, object]):
@@ -44,6 +45,7 @@ def assemble_analysis_response_from_vcf_context(context: dict[str, Any]) -> Anal
     if not context["ui_cards"]:
         context["ui_cards"] = build_ui_cards(facts, annotations)
     return AnalysisResponse(
+        **source_response_metadata("vcf"),
         analysis_id=str(uuid.uuid4()),
         facts=facts,
         annotations=annotations,

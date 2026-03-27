@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class FromPathRequest(BaseModel):
@@ -199,6 +199,10 @@ class ToolRunResponse(BaseModel):
 
 class AnalysisResponse(BaseModel):
     analysis_id: str
+    source_type: Optional[str] = None
+    result_kind: Optional[str] = None
+    requested_view: Optional[str] = None
+    studio: Optional[dict[str, Any]] = None
     facts: AnalysisFacts
     annotations: list[VariantAnnotation]
     roh_segments: list[RohSegment]
@@ -233,14 +237,31 @@ class ChatTurn(BaseModel):
     content: str
 
 
+class StudioContextPreview(BaseModel):
+    columns: list[str] = []
+    rows: list[dict[str, Any]] = []
+
+
+class StudioContextPayload(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    active_view: Optional[str] = None
+    current_card: Optional[dict[str, Any]] = None
+    current_summary: Optional[dict[str, Any]] = None
+    current_schema: list[dict[str, Any]] = []
+    current_preview: Optional[StudioContextPreview] = None
+    current_warnings: list[str] = []
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
 class AnalysisChatRequest(BaseModel):
     question: str
     analysis: AnalysisResponse
     history: list[ChatTurn] = []
-    studio_context: dict[str, Any] = {}
+    studio_context: StudioContextPayload = Field(default_factory=StudioContextPayload)
 
 
 class AnalysisChatResponse(BaseModel):
+    source_type: Optional[str] = None
     answer: str
     citations: list[str]
     used_fallback: bool
@@ -273,6 +294,10 @@ class RawQcModule(BaseModel):
 
 class RawQcResponse(BaseModel):
     analysis_id: str
+    source_type: Optional[str] = None
+    result_kind: Optional[str] = None
+    requested_view: Optional[str] = None
+    studio: Optional[dict[str, Any]] = None
     source_raw_path: Optional[str] = None
     facts: RawQcFacts
     modules: list[RawQcModule]
@@ -288,9 +313,11 @@ class RawQcChatRequest(BaseModel):
     question: str
     analysis: RawQcResponse
     history: list[ChatTurn] = []
+    studio_context: StudioContextPayload = Field(default_factory=StudioContextPayload)
 
 
 class RawQcChatResponse(BaseModel):
+    source_type: Optional[str] = None
     answer: str
     citations: list[str]
     used_fallback: bool
@@ -316,6 +343,10 @@ class SummaryStatsFieldMapping(BaseModel):
 
 class SummaryStatsResponse(BaseModel):
     analysis_id: str
+    source_type: Optional[str] = None
+    result_kind: Optional[str] = None
+    requested_view: Optional[str] = None
+    studio: Optional[dict[str, Any]] = None
     source_stats_path: Optional[str] = None
     file_name: str
     genome_build: str = "unknown"
@@ -351,9 +382,11 @@ class SummaryStatsChatRequest(BaseModel):
     question: str
     analysis: SummaryStatsResponse
     history: list[ChatTurn] = []
+    studio_context: StudioContextPayload = Field(default_factory=StudioContextPayload)
 
 
 class SummaryStatsChatResponse(BaseModel):
+    source_type: Optional[str] = None
     answer: str
     citations: list[str]
     used_fallback: bool
@@ -367,6 +400,10 @@ class SummaryStatsChatResponse(BaseModel):
 
 class TextSourceResponse(BaseModel):
     analysis_id: str
+    source_type: Optional[str] = None
+    result_kind: Optional[str] = None
+    requested_view: Optional[str] = None
+    studio: Optional[dict[str, Any]] = None
     source_text_path: Optional[str] = None
     file_name: str
     media_type: str = "text/plain"
@@ -384,10 +421,11 @@ class TextChatRequest(BaseModel):
     question: str
     analysis: TextSourceResponse
     history: list[ChatTurn] = []
-    studio_context: dict[str, Any] = {}
+    studio_context: StudioContextPayload = Field(default_factory=StudioContextPayload)
 
 
 class TextChatResponse(BaseModel):
+    source_type: Optional[str] = None
     answer: str
     citations: list[str]
     used_fallback: bool
@@ -399,6 +437,10 @@ class TextChatResponse(BaseModel):
 
 class SpreadsheetSourceResponse(BaseModel):
     analysis_id: str
+    source_type: Optional[str] = None
+    result_kind: Optional[str] = None
+    requested_view: Optional[str] = None
+    studio: Optional[dict[str, Any]] = None
     source_spreadsheet_path: Optional[str] = None
     file_name: str
     workbook_format: str = "xlsx"
@@ -418,10 +460,11 @@ class SpreadsheetChatRequest(BaseModel):
     question: str
     analysis: SpreadsheetSourceResponse
     history: list[ChatTurn] = []
-    studio_context: dict[str, Any] = {}
+    studio_context: StudioContextPayload = Field(default_factory=StudioContextPayload)
 
 
 class SpreadsheetChatResponse(BaseModel):
+    source_type: Optional[str] = None
     answer: str
     citations: list[str]
     used_fallback: bool
@@ -493,6 +536,26 @@ class SourceReadyResponse(BaseModel):
     file_name: str
     source_path: str
     file_kind: Optional[str] = None
+
+
+class SourceChatRequest(BaseModel):
+    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet"]
+    question: str
+    analysis_payload: dict[str, Any]
+    history: list[ChatTurn] = []
+    studio_context: StudioContextPayload = Field(default_factory=StudioContextPayload)
+
+
+class SourceChatResponse(BaseModel):
+    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet"]
+    answer: str
+    citations: list[str]
+    used_fallback: bool
+    result_kind: Optional[str] = None
+    requested_view: Optional[str] = None
+    studio: Optional[dict[str, Any]] = None
+    analysis_payload: Optional[dict[str, Any]] = None
+    artifact_payload: dict[str, Any] = Field(default_factory=dict)
 
 
 class FilterRequest(BaseModel):

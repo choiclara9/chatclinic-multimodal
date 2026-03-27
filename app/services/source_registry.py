@@ -10,6 +10,11 @@ SOURCE_REGISTRY: dict[str, dict[str, object]] = {
         "dedicated_upload_detail": "Only Excel workbook uploads such as .xlsx and .xlsm are supported.",
         "bootstrap_source_type": "spreadsheet",
         "chat_response_kind": "spreadsheet",
+        "default_result_kind": "spreadsheet_analysis",
+        "default_requested_view": "cohort_browser",
+        "studio_renderer": "cohort_browser",
+        "studio_card_kind": "tabular_browser",
+        "studio_preview_kind": "sheet_grid",
         "workflow_names": ["spreadsheet_review"],
         "capabilities": ["source_upload", "bootstrap_analysis", "workflow", "grounded_chat"],
         "suffixes": [
@@ -26,6 +31,11 @@ SOURCE_REGISTRY: dict[str, dict[str, object]] = {
         "dedicated_upload_detail": "Only Markdown and plain-text note uploads such as .md, .markdown, .text, .note, and .log are supported.",
         "bootstrap_source_type": "text",
         "chat_response_kind": "text",
+        "default_result_kind": "text_analysis",
+        "default_requested_view": "text",
+        "studio_renderer": "text",
+        "studio_card_kind": "document_viewer",
+        "studio_preview_kind": "markdown",
         "workflow_names": ["text_review"],
         "capabilities": ["source_upload", "bootstrap_analysis", "workflow", "grounded_chat"],
         "suffixes": [
@@ -48,6 +58,11 @@ SOURCE_REGISTRY: dict[str, dict[str, object]] = {
         "dedicated_upload_detail": "Only FASTQ, FASTQ.gz, FQ, FQ.gz, BAM, and SAM uploads are supported.",
         "bootstrap_source_type": "raw_qc",
         "chat_response_kind": "raw_qc",
+        "default_result_kind": "raw_qc_analysis",
+        "default_requested_view": "rawqc",
+        "studio_renderer": "rawqc",
+        "studio_card_kind": "qc_review",
+        "studio_preview_kind": "qc_modules",
         "workflow_names": ["raw_qc_review"],
         "capabilities": ["source_upload", "bootstrap_analysis", "direct_tool", "workflow"],
         "suffixes": [
@@ -72,6 +87,11 @@ SOURCE_REGISTRY: dict[str, dict[str, object]] = {
         "dedicated_upload_detail": "Only TSV/TXT/CSV summary statistics uploads are supported.",
         "bootstrap_source_type": "summary_stats",
         "chat_response_kind": "summary_stats",
+        "default_result_kind": "summary_stats_analysis",
+        "default_requested_view": "sumstats",
+        "studio_renderer": "sumstats",
+        "studio_card_kind": "tabular_summary",
+        "studio_preview_kind": "preview_rows",
         "workflow_names": ["summary_stats_review", "prs_prep"],
         "capabilities": ["source_upload", "bootstrap_analysis", "direct_tool", "workflow"],
         "suffixes": [
@@ -90,6 +110,11 @@ SOURCE_REGISTRY: dict[str, dict[str, object]] = {
         "dedicated_upload_detail": "Only .vcf and .vcf.gz uploads are supported.",
         "bootstrap_source_type": "vcf",
         "chat_response_kind": "analysis",
+        "default_result_kind": "analysis",
+        "default_requested_view": "summary",
+        "studio_renderer": "candidates",
+        "studio_card_kind": "variant_review",
+        "studio_preview_kind": "candidate_table",
         "workflow_names": ["representative_vcf_review"],
         "capabilities": ["source_upload", "bootstrap_analysis", "direct_tool", "workflow"],
         "suffixes": [
@@ -185,3 +210,29 @@ def source_capabilities(source_type: str) -> tuple[str, ...]:
     if not isinstance(capabilities, list):
         return ()
     return tuple(str(item).strip() for item in capabilities if str(item).strip())
+
+
+def source_response_metadata(source_type: str) -> dict[str, object]:
+    registration = load_source_registration(source_type)
+    if registration is None:
+        return {"source_type": source_type}
+    studio_renderer = str(registration.get("studio_renderer") or "").strip()
+    studio_card_kind = str(registration.get("studio_card_kind") or "").strip()
+    studio_preview_kind = str(registration.get("studio_preview_kind") or "").strip()
+    requested_view = str(registration.get("default_requested_view") or "").strip() or None
+    result_kind = str(registration.get("default_result_kind") or "").strip() or None
+    studio = (
+        {
+            "renderer": studio_renderer,
+            "card_kind": studio_card_kind or None,
+            "preview_kind": studio_preview_kind or None,
+        }
+        if studio_renderer or studio_card_kind or studio_preview_kind
+        else None
+    )
+    return {
+        "source_type": source_type,
+        "result_kind": result_kind,
+        "requested_view": requested_view,
+        "studio": studio,
+    }

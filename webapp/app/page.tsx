@@ -63,6 +63,7 @@ type AnalysisResponse = {
     record_count: number;
     samples: string[];
     genome_build_guess: string | null;
+    warnings: string[];
     variant_types: Record<string, number>;
     genotype_counts: Record<string, number>;
     qc: {
@@ -3712,25 +3713,53 @@ export default function Page() {
           : null;
       return {
         active_view: activeStudioView,
-        sheet_count: spreadsheetAnalysis.sheet_count,
-        selected_sheet: selectedSpreadsheetSheet,
-        sheet_names: spreadsheetAnalysis.sheet_names,
-        sheet_details: spreadsheetAnalysis.sheet_details?.slice(0, 8),
-        current_sheet: selectedSpreadsheetArtifact
+        current_card: selectedSpreadsheetArtifact,
+        current_summary: selectedSpreadsheetArtifact
           ? {
+              selected_sheet: selectedSpreadsheetSheet,
               overview: selectedSpreadsheetArtifact.overview ?? null,
               intake: selectedSpreadsheetArtifact.intake ?? null,
-              schema_highlights: Array.isArray(selectedSpreadsheetArtifact.schema_highlights)
-                ? selectedSpreadsheetArtifact.schema_highlights.slice(0, 24)
-                : [],
-              missingness: selectedSpreadsheetArtifact.missingness ?? null,
               composition: selectedSpreadsheetArtifact.composition ?? null,
-              preview_columns: selectedSpreadsheetArtifact.grid?.columns ?? [],
-              preview_rows: Array.isArray(selectedSpreadsheetArtifact.grid?.rows)
+            }
+          : null,
+        current_schema:
+          selectedSpreadsheetArtifact && Array.isArray(selectedSpreadsheetArtifact.schema_highlights)
+            ? selectedSpreadsheetArtifact.schema_highlights.slice(0, 24)
+            : [],
+        current_preview: selectedSpreadsheetArtifact
+          ? {
+              columns: selectedSpreadsheetArtifact.grid?.columns ?? [],
+              rows: Array.isArray(selectedSpreadsheetArtifact.grid?.rows)
                 ? selectedSpreadsheetArtifact.grid.rows.slice(0, 60)
                 : [],
             }
           : null,
+        current_warnings: Array.isArray(selectedSpreadsheetArtifact?.warnings)
+          ? selectedSpreadsheetArtifact.warnings.slice(0, 12)
+          : Array.isArray(spreadsheetAnalysis.warnings)
+            ? spreadsheetAnalysis.warnings.slice(0, 12)
+            : [],
+        extra: {
+          sheet_count: spreadsheetAnalysis.sheet_count,
+          selected_sheet: selectedSpreadsheetSheet,
+          sheet_names: spreadsheetAnalysis.sheet_names,
+          sheet_details: spreadsheetAnalysis.sheet_details?.slice(0, 8),
+          current_sheet: selectedSpreadsheetArtifact
+            ? {
+                overview: selectedSpreadsheetArtifact.overview ?? null,
+                intake: selectedSpreadsheetArtifact.intake ?? null,
+                schema_highlights: Array.isArray(selectedSpreadsheetArtifact.schema_highlights)
+                  ? selectedSpreadsheetArtifact.schema_highlights.slice(0, 24)
+                  : [],
+                missingness: selectedSpreadsheetArtifact.missingness ?? null,
+                composition: selectedSpreadsheetArtifact.composition ?? null,
+                preview_columns: selectedSpreadsheetArtifact.grid?.columns ?? [],
+                preview_rows: Array.isArray(selectedSpreadsheetArtifact.grid?.rows)
+                  ? selectedSpreadsheetArtifact.grid.rows.slice(0, 60)
+                  : [],
+              }
+            : null,
+        },
       };
     }
     if (!analysis) {
@@ -3738,59 +3767,93 @@ export default function Page() {
     }
     return {
       active_view: activeStudioView,
-      qc_summary: {
-        pass_rate: qcMetrics?.pass_rate,
-        ti_tv: qcMetrics?.transition_transversion_ratio,
-        missing_gt_rate: qcMetrics?.missing_gt_rate,
-        het_hom_alt_ratio: qcMetrics?.het_hom_alt_ratio,
+      current_card: selectedAnnotation
+        ? {
+            locus: `${selectedAnnotation.contig}:${selectedAnnotation.pos_1based}`,
+            gene: selectedAnnotation.gene,
+            rsid: selectedAnnotation.rsid,
+            consequence: selectedAnnotation.consequence,
+          }
+        : null,
+      current_summary: {
+        qc_summary: {
+          pass_rate: qcMetrics?.pass_rate,
+          ti_tv: qcMetrics?.transition_transversion_ratio,
+          missing_gt_rate: qcMetrics?.missing_gt_rate,
+          het_hom_alt_ratio: qcMetrics?.het_hom_alt_ratio,
+        },
+        candidate_count: candidateVariants.length,
+        roh_segment_count: analysis.roh_segments?.length ?? 0,
       },
-      clinical_coverage: clinicalCoverage.slice(0, 5),
-      filtering_summary: filteringSummary.slice(0, 4),
-      symbolic_alt_review: {
-        count: symbolicAnnotations.length,
-        examples: symbolicAnnotations.slice(0, 5).map((item) => ({
-          locus: `${item.contig}:${item.pos_1based}`,
-          gene: item.gene,
-          alts: item.alts,
-          consequence: item.consequence,
-          genotype: item.genotype,
-        })),
-      },
-      roh_review: {
-        segment_count: analysis.roh_segments?.length ?? 0,
-        segments: (analysis.roh_segments ?? []).slice(0, 5).map((segment) => ({
-          sample: segment.sample,
-          contig: segment.contig,
-          start_1based: segment.start_1based,
-          end_1based: segment.end_1based,
-          length_bp: segment.length_bp,
-          marker_count: segment.marker_count,
-          quality: segment.quality,
-        })),
-        recessive_shortlist: recessiveShortlist.slice(0, 6).map(({ item, score, inRoh }) => ({
+      current_schema: [],
+      current_preview: {
+        columns: ["locus", "gene", "rsid", "consequence", "clinical_significance", "gnomad_af", "score", "in_roh"],
+        rows: candidateVariants.slice(0, 6).map(({ item, score, inRoh }) => ({
           locus: `${item.contig}:${item.pos_1based}`,
           gene: item.gene,
           rsid: item.rsid,
           consequence: item.consequence,
-          genotype: item.genotype,
+          clinical_significance: item.clinical_significance,
           gnomad_af: item.gnomad_af,
           score,
           in_roh: inRoh,
         })),
       },
-      candidate_variants: candidateVariants.slice(0, 6).map(({ item, score, inRoh }) => ({
-        locus: `${item.contig}:${item.pos_1based}`,
-        gene: item.gene,
-        rsid: item.rsid,
-        consequence: item.consequence,
-        clinical_significance: item.clinical_significance,
-        gnomad_af: item.gnomad_af,
-        score,
-        in_roh: inRoh,
-      })),
-      clinvar_review: clinvarCounts.slice(0, 8),
-      vep_consequence: consequenceCounts.slice(0, 10),
-      snpeff_preview: analysis?.snpeff_result
+      current_warnings: analysis.facts?.warnings?.slice(0, 12) ?? [],
+      extra: {
+        qc_summary: {
+          pass_rate: qcMetrics?.pass_rate,
+          ti_tv: qcMetrics?.transition_transversion_ratio,
+          missing_gt_rate: qcMetrics?.missing_gt_rate,
+          het_hom_alt_ratio: qcMetrics?.het_hom_alt_ratio,
+        },
+        clinical_coverage: clinicalCoverage.slice(0, 5),
+        filtering_summary: filteringSummary.slice(0, 4),
+        symbolic_alt_review: {
+          count: symbolicAnnotations.length,
+          examples: symbolicAnnotations.slice(0, 5).map((item) => ({
+            locus: `${item.contig}:${item.pos_1based}`,
+            gene: item.gene,
+            alts: item.alts,
+            consequence: item.consequence,
+            genotype: item.genotype,
+          })),
+        },
+        roh_review: {
+          segment_count: analysis.roh_segments?.length ?? 0,
+          segments: (analysis.roh_segments ?? []).slice(0, 5).map((segment) => ({
+            sample: segment.sample,
+            contig: segment.contig,
+            start_1based: segment.start_1based,
+            end_1based: segment.end_1based,
+            length_bp: segment.length_bp,
+            marker_count: segment.marker_count,
+            quality: segment.quality,
+          })),
+          recessive_shortlist: recessiveShortlist.slice(0, 6).map(({ item, score, inRoh }) => ({
+            locus: `${item.contig}:${item.pos_1based}`,
+            gene: item.gene,
+            rsid: item.rsid,
+            consequence: item.consequence,
+            genotype: item.genotype,
+            gnomad_af: item.gnomad_af,
+            score,
+            in_roh: inRoh,
+          })),
+        },
+        candidate_variants: candidateVariants.slice(0, 6).map(({ item, score, inRoh }) => ({
+          locus: `${item.contig}:${item.pos_1based}`,
+          gene: item.gene,
+          rsid: item.rsid,
+          consequence: item.consequence,
+          clinical_significance: item.clinical_significance,
+          gnomad_af: item.gnomad_af,
+          score,
+          in_roh: inRoh,
+        })),
+        clinvar_review: clinvarCounts.slice(0, 8),
+        vep_consequence: consequenceCounts.slice(0, 10),
+        snpeff_preview: analysis?.snpeff_result
         ? {
             genome: analysis.snpeff_result.genome,
             parsed_records: analysis.snpeff_result.parsed_records.slice(0, 5).map((record) => ({
@@ -3807,7 +3870,7 @@ export default function Page() {
             })),
           }
         : null,
-      liftover_preview: analysis?.liftover_result
+        liftover_preview: analysis?.liftover_result
         ? {
             source_build: analysis.liftover_result.source_build,
             target_build: analysis.liftover_result.target_build,
@@ -3816,14 +3879,14 @@ export default function Page() {
             warnings: analysis.liftover_result.warnings.slice(0, 6),
           }
         : null,
-      ldblockshow_preview: analysis?.ldblockshow_result
+        ldblockshow_preview: analysis?.ldblockshow_result
         ? {
             region: analysis.ldblockshow_result.region,
             svg_path: analysis.ldblockshow_result.svg_path,
             warnings: analysis.ldblockshow_result.warnings.slice(0, 6),
           }
         : null,
-      plink_preview: analysis?.plink_result
+        plink_preview: analysis?.plink_result
         ? {
             output_prefix: analysis.plink_result.output_prefix,
             sample_count: analysis.plink_result.sample_count,
@@ -3831,7 +3894,7 @@ export default function Page() {
             warnings: analysis.plink_result.warnings.slice(0, 6),
           }
         : null,
-      selected_annotation: selectedAnnotation
+        selected_annotation: selectedAnnotation
         ? {
             locus: `${selectedAnnotation.contig}:${selectedAnnotation.pos_1based}`,
             gene: selectedAnnotation.gene,
@@ -3843,6 +3906,7 @@ export default function Page() {
             hgvsp: selectedAnnotation.hgvsp,
           }
         : null,
+      },
     };
   }, [
     activeStudioView,
