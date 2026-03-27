@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { buildStudioRendererRegistry } from "./components/studioRenderers";
+import {
+  buildStudioRendererRegistry,
+  resolveStudioDispatchFromPayload,
+  resolveStudioRendererKey,
+  type StudioRendererDispatch,
+} from "./components/studioRenderers";
 
 type TranscriptAnnotation = {
   transcript_id: string;
@@ -345,6 +350,7 @@ type SummaryStatsChatResponse = {
   answer: string;
   citations: string[];
   used_fallback: boolean;
+  result_kind?: string | null;
   requested_view?: StudioView | null;
   analysis?: SummaryStatsResponse | null;
   qqman_result?: RPlotResponse | null;
@@ -371,6 +377,7 @@ type AnalysisChatResponse = {
   citations: string[];
   used_fallback: boolean;
   used_tools?: string[];
+  result_kind?: string | null;
   requested_view?: StudioView | null;
   analysis?: AnalysisResponse | null;
   plink_result?: AnalysisResponse["plink_result"];
@@ -382,6 +389,7 @@ type RawQcChatResponse = {
   answer: string;
   citations: string[];
   used_fallback: boolean;
+  result_kind?: string | null;
   requested_view?: StudioView | null;
   analysis?: RawQcResponse | null;
   samtools_result?: RawQcResponse["samtools_result"];
@@ -1172,6 +1180,7 @@ export default function Page() {
   const [analysisQa, setAnalysisQa] = useState<AnalysisQuestionTurn[]>([]);
   const [followUpAnswer, setFollowUpAnswer] = useState<string | null>(null);
   const [activeStudioView, setActiveStudioView] = useState<StudioView | null>(null);
+  const [studioDispatch, setStudioDispatch] = useState<StudioRendererDispatch>({});
   const [plinkRunning, setPlinkRunning] = useState(false);
   const [plinkConfig, setPlinkConfig] = useState({
     mode: "qc",
@@ -1751,7 +1760,7 @@ export default function Page() {
       }
       const payload = (await response.json()) as AnalysisResponse["liftover_result"];
       setDirectLiftoverResult(payload ?? null);
-      setActiveStudioView("liftover");
+      activateStudioFromPayload({ result_kind: "liftover_result" }, "liftover");
       setStatus(toolReadyStatus(alias, remainder));
       addMessage({
         role: "assistant",
@@ -1779,7 +1788,7 @@ export default function Page() {
       }
       const payload = (await response.json()) as RawQcResponse["samtools_result"];
       setDirectSamtoolsResult(payload ?? null);
-      setActiveStudioView("samtools");
+      activateStudioFromPayload({ result_kind: "samtools_result" }, "samtools");
       setStatus(toolReadyStatus(alias, remainder));
       addMessage({
         role: "assistant",
@@ -1842,7 +1851,7 @@ export default function Page() {
       }
       const payload = (await response.json()) as AnalysisResponse["plink_result"];
       setDirectPlinkResult(payload ?? null);
-      setActiveStudioView("plink");
+      activateStudioFromPayload({ result_kind: "plink_result" }, "plink");
       setStatus(toolReadyStatus(alias, remainder));
       addMessage({
         role: "assistant",
@@ -1874,7 +1883,7 @@ export default function Page() {
       }
       const payload = await response.json();
       setDirectSnpeffResult(payload ?? null);
-      setActiveStudioView("snpeff");
+      activateStudioFromPayload({ result_kind: "snpeff_result" }, "snpeff");
       setStatus(toolReadyStatus(alias, remainder));
       addMessage({
         role: "assistant",
@@ -1908,7 +1917,7 @@ export default function Page() {
       }
       const payload = await response.json();
       setDirectLdblockshowResult(payload ?? null);
-      setActiveStudioView("ldblockshow");
+      activateStudioFromPayload({ result_kind: "ldblockshow_result" }, "ldblockshow");
       setStatus(toolReadyStatus(alias, remainder));
       addMessage({
         role: "assistant",
@@ -1935,7 +1944,7 @@ export default function Page() {
       }
       const payload = (await response.json()) as RPlotResponse;
       setDirectQqmanResult(payload);
-      setActiveStudioView("qqman");
+      activateStudioFromPayload({ result_kind: "qqman_result" }, "qqman");
       setStatus(toolReadyStatus(alias, remainder));
       addMessage({
         role: "assistant",
@@ -1982,7 +1991,7 @@ export default function Page() {
       const payload: RawQcResponse = await response.json();
       setRawQcAnalysis(payload);
       setAnalysis(null);
-      setActiveStudioView("rawqc");
+      activateStudioFromPayload({ requested_view: "rawqc" }, "rawqc");
       setStatus("Raw QC ready");
       setComposerText("");
       return payload;
@@ -2030,7 +2039,7 @@ export default function Page() {
       setSummaryStatsAnalysis(payload);
       setAnalysis(null);
       setRawQcAnalysis(null);
-      setActiveStudioView("sumstats");
+      activateStudioFromPayload({ requested_view: "sumstats" }, "sumstats");
       setStatus("Summary stats ready");
       setComposerText("");
       return payload;
@@ -2073,7 +2082,7 @@ export default function Page() {
       const payload: PrsPrepResponse = await response.json();
       setDirectPrsPrepResult(payload);
       setLatestPrsPrepResult(payload);
-      setActiveStudioView("prs_prep");
+      activateStudioFromPayload({ requested_view: "prs_prep", result_kind: "prs_prep_result" }, "prs_prep");
       setStatus("PRS prep ready");
       setComposerText("");
       addMessage({
@@ -2425,11 +2434,7 @@ export default function Page() {
         setAnalysis(payload.analysis);
       }
       setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
-      if (payload.requested_view === "plink") {
-        setActiveStudioView("plink");
-      } else if (payload.requested_view) {
-        setActiveStudioView(payload.requested_view);
-      }
+      activateStudioFromPayload(payload);
       if (payload.plink_result) {
         setAnalysis((current) =>
           current
@@ -2440,7 +2445,7 @@ export default function Page() {
               }
             : current,
         );
-        setActiveStudioView("plink");
+        activateStudioFromPayload({ ...payload, result_kind: "plink_result" }, "plink");
       }
       if (payload.liftover_result) {
         setAnalysis((current) =>
@@ -2452,7 +2457,7 @@ export default function Page() {
               }
             : current,
         );
-        setActiveStudioView("liftover");
+        activateStudioFromPayload({ ...payload, result_kind: "liftover_result" }, "liftover");
       }
       if (payload.ldblockshow_result) {
         setAnalysis((current) =>
@@ -2464,7 +2469,7 @@ export default function Page() {
               }
             : current,
         );
-        setActiveStudioView("ldblockshow");
+        activateStudioFromPayload({ ...payload, result_kind: "ldblockshow_result" }, "ldblockshow");
       }
       setFollowUpAnswer(payload.answer);
       setStatus("Answer ready");
@@ -2530,7 +2535,7 @@ export default function Page() {
       if (!analysis) {
         setDirectPlinkResult(payload ?? null);
       }
-      setActiveStudioView("plink");
+      activateStudioFromPayload({ result_kind: "plink_result" }, "plink");
       setStatus("PLINK ready");
     } catch (caught) {
       const msg = caught instanceof Error ? caught.message : String(caught);
@@ -2620,9 +2625,9 @@ export default function Page() {
               }
             : current,
         );
-        setActiveStudioView("samtools");
+        activateStudioFromPayload({ ...payload, result_kind: "samtools_result" }, "samtools");
       } else if (payload.requested_view) {
-        setActiveStudioView(payload.requested_view);
+        activateStudioFromPayload(payload);
       }
       setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
       setFollowUpAnswer(payload.answer);
@@ -2672,9 +2677,7 @@ export default function Page() {
           current ? { ...current, prs_prep_result: payload.prs_prep_result ?? null } : current,
         );
       }
-      if (payload.requested_view) {
-        setActiveStudioView(payload.requested_view);
-      }
+      activateStudioFromPayload(payload);
       setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
       setFollowUpAnswer(payload.answer);
       setStatus("Answer ready");
@@ -3220,7 +3223,27 @@ export default function Page() {
       summarizeLabel,
     },
   });
-  const registeredStudioRenderer = activeStudioView ? externalStudioRendererRegistry[activeStudioView] : null;
+  const resolvedStudioRendererKey = resolveStudioRendererKey({
+    activeView: activeStudioView,
+    dispatch: studioDispatch,
+  });
+  const registeredStudioRenderer = resolvedStudioRendererKey ? externalStudioRendererRegistry[resolvedStudioRendererKey] : null;
+
+  function activateStudioFromPayload(payload: Record<string, unknown> | null | undefined, fallbackView?: StudioView | null) {
+    const dispatch = resolveStudioDispatchFromPayload(payload);
+    setStudioDispatch(dispatch);
+    const resolvedView = resolveStudioRendererKey({
+      activeView: fallbackView,
+      dispatch,
+    });
+    if (resolvedView) {
+      setActiveStudioView(resolvedView as StudioView);
+      return;
+    }
+    if (fallbackView) {
+      setActiveStudioView(fallbackView);
+    }
+  }
   const studioContext = useMemo(() => {
     if (!analysis) {
       return {};
