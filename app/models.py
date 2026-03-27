@@ -17,6 +17,22 @@ class FromPathRequest(BaseModel):
     )
 
 
+class SourceFromPathRequest(BaseModel):
+    source_path: str = Field(..., description="Absolute path to a registered source file")
+    source_type: Optional[str] = Field(default=None, description="Optional explicit source type")
+    file_name: Optional[str] = Field(default=None, description="Optional display file name override")
+    annotation_scope: Literal["representative", "all"] = Field(
+        default="representative",
+        description="VCF-only option controlling whether to annotate representative variants or the whole file.",
+    )
+    annotation_limit: Optional[int] = Field(
+        default=None,
+        description="Optional VCF-only cap on the number of variants to annotate when scope is 'all'.",
+    )
+    genome_build: str = Field(default="unknown", description="Summary-statistics genome build hint.")
+    trait_type: str = Field(default="unknown", description="Summary-statistics trait type hint.")
+
+
 class ReferenceItem(BaseModel):
     id: str
     title: str

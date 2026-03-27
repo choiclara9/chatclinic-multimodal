@@ -43,6 +43,7 @@ from app.models import (
     SummaryStatsChatRequest,
     SummaryStatsChatResponse,
     SummaryStatsResponse,
+    SourceFromPathRequest,
     ToolInfo,
     WorkflowAgentResponse,
     WorkflowReplyRequest,
@@ -65,7 +66,6 @@ from app.services.tool_runner import discover_tools
 from app.services.workflow_agent import interpret_workflow_reply, start_workflow
 from app.services.workflows import (
     analyze_prs_prep_workflow,
-    analyze_vcf_workflow,
 )
 from plugins.fastqc_execution_tool.logic import FASTQC_OUTPUT_DIR
 from plugins.filtering_view_tool.logic import run_filter
@@ -298,6 +298,65 @@ def _persist_and_bootstrap_upload(
     return _run_source_bootstrap(source_type, durable_path, file_name, **kwargs)
 
 
+def _bootstrap_kwargs_for_source(
+    source_type: str,
+    *,
+    annotation_scope: str = "representative",
+    annotation_limit: int | None = None,
+    genome_build: str = "unknown",
+    trait_type: str = "unknown",
+) -> dict[str, object]:
+    if source_type == "vcf":
+        return {
+            "annotation_scope": annotation_scope,
+            "annotation_limit": annotation_limit,
+        }
+    if source_type == "summary_stats":
+        return {
+            "genome_build": genome_build,
+            "trait_type": trait_type,
+        }
+    return {}
+
+
+def _resolve_source_path_request(request: SourceFromPathRequest) -> tuple[str, Path, str]:
+    source_path = Path(request.source_path).expanduser().resolve()
+    if not source_path.exists():
+        raise HTTPException(status_code=404, detail=f"Source file not found: {source_path}")
+    file_name = request.file_name or source_path.name
+    if request.source_type:
+        source_type = request.source_type.strip().lower()
+        if not source_type:
+            raise HTTPException(status_code=400, detail="Source type cannot be blank when provided.")
+        _resolve_source_upload(file_name, expected_source_type=source_type)
+        return source_type, source_path, file_name
+    detected = detect_source_registration(file_name)
+    if detected is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported source type. Provide a registered file name or explicit source_type.",
+        )
+    return detected[0], source_path, file_name
+
+
+def _analyze_registered_source_path(
+    request: SourceFromPathRequest,
+) -> AnalysisResponse | RawQcResponse | SummaryStatsResponse:
+    source_type, source_path, file_name = _resolve_source_path_request(request)
+    return _run_source_bootstrap(
+        source_type,
+        source_path,
+        file_name,
+        **_bootstrap_kwargs_for_source(
+            source_type,
+            annotation_scope=request.annotation_scope,
+            annotation_limit=request.annotation_limit,
+            genome_build=request.genome_build,
+            trait_type=request.trait_type,
+        ),
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -352,11 +411,17 @@ def get_output_file(path: str = Query(..., description="Absolute path to a gener
 @app.post("/api/v1/analysis/from-path", response_model=AnalysisResponse)
 def analyze_from_path(request: FromPathRequest) -> AnalysisResponse:
     try:
-        return analyze_vcf_workflow(
-            request.vcf_path,
-            annotation_scope=request.annotation_scope,
-            annotation_limit=request.annotation_limit,
+        result = _analyze_registered_source_path(
+            SourceFromPathRequest(
+                source_path=request.vcf_path,
+                source_type="vcf",
+                annotation_scope=request.annotation_scope,
+                annotation_limit=request.annotation_limit,
+            )
         )
+        if not isinstance(result, AnalysisResponse):
+            raise HTTPException(status_code=500, detail="Unexpected analysis response type for VCF path request.")
+        return result
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
@@ -368,12 +433,40 @@ def analyze_from_path_async(request: FromPathRequest) -> AnalysisJobResponse:
     job_id = create_job()
     run_job(
         job_id,
-        lambda: analyze_vcf_workflow(
-            request.vcf_path,
-            annotation_scope=request.annotation_scope,
-            annotation_limit=request.annotation_limit,
+        lambda: _analyze_registered_source_path(
+            SourceFromPathRequest(
+                source_path=request.vcf_path,
+                source_type="vcf",
+                annotation_scope=request.annotation_scope,
+                annotation_limit=request.annotation_limit,
+            )
         ).model_dump(),
     )
+    job = get_job(job_id)
+    return AnalysisJobResponse(job_id=job_id, status=job["status"])
+
+
+@app.post(
+    "/api/v1/source/from-path",
+    response_model=AnalysisResponse | RawQcResponse | SummaryStatsResponse,
+)
+def analyze_registered_source_from_path(
+    request: SourceFromPathRequest,
+) -> AnalysisResponse | RawQcResponse | SummaryStatsResponse:
+    try:
+        return _analyze_registered_source_path(request)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Source analysis failed: {exc}") from exc
+
+
+@app.post("/api/v1/source/from-path/async", response_model=AnalysisJobResponse)
+def analyze_registered_source_from_path_async(request: SourceFromPathRequest) -> AnalysisJobResponse:
+    job_id = create_job()
+    run_job(job_id, lambda: _analyze_registered_source_path(request).model_dump())
     job = get_job(job_id)
     return AnalysisJobResponse(job_id=job_id, status=job["status"])
 
