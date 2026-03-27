@@ -7,37 +7,18 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Optional
 
-from app.models import (
-    AnalysisFacts,
-    AnalysisResponse,
-    CountSummaryItem,
-    DetailedCountSummaryItem,
-    PrsPrepResponse,
-    RawQcResponse,
-    RankedCandidate,
-    RohSegment,
-    SummaryStatsResponse,
-    SymbolicAltSummary,
-    ToolInfo,
-    VariantAnnotation,
-)
-from app.services.annotation import build_draft_answer, build_ui_cards
-from app.services.candidate_ranking import build_ranked_candidates
+from app.models import AnalysisFacts, AnalysisResponse, PrsPrepResponse, RawQcResponse, SummaryStatsResponse, SymbolicAltSummary, ToolInfo
+from app.services.annotation import build_ui_cards
 from app.services.fastqc import FASTQC_OUTPUT_DIR
 from app.services.recommendation import build_recommendations
 from app.services.references import build_reference_bundle
-from app.services.roh_analysis import run_roh_analysis
 from app.services.prs_prep import analyze_prs_prep
 from app.services.summary_stats import analyze_summary_stats
 from app.services.tool_runner import discover_tools, run_tool
-from app.services.variant_annotation import annotate_variants
-from app.services.vcf_summary import summarize_vcf
 from app.services.workflow_fallbacks import compute_vcf_fallback_value
 from app.services.workflow_hooks import (
-    annotation_key,
     apply_vcf_postprocess_hook,
     apply_vcf_preprocess_hook,
-    snpeff_genome_from_build,
 )
 from app.services.workflow_internal_steps import (
     execute_raw_qc_internal_step,
@@ -287,225 +268,6 @@ def _vcf_workflow_context(
         "ui_cards": [],
         "draft_answer": "",
     }
-
-
-def _execute_vcf_qc_step(context: dict[str, Any], bind_name: str) -> None:
-    path = str(context["source_vcf_path"])
-    qc_result = run_tool(
-        "vcf_qc_tool",
-        {
-            "vcf_path": path,
-            "max_examples": context["max_examples"],
-        },
-    )
-    context[bind_name] = AnalysisFacts(**qc_result["facts"])
-    context["used_tools"].append("vcf_qc_tool")
-
-
-def _fallback_vcf_qc_step(context: dict[str, Any], bind_name: str) -> None:
-    path = str(context["source_vcf_path"])
-    context[bind_name] = summarize_vcf(path, max_examples=context["max_examples"])
-
-
-def _execute_annotation_step(context: dict[str, Any], bind_name: str) -> None:
-    path = str(context["source_vcf_path"])
-    facts: AnalysisFacts = context["facts"]
-    annotation_result = run_tool(
-        "annotation_tool",
-        {
-            "vcf_path": path,
-            "facts": facts.model_dump(),
-            "scope": context["annotation_scope"],
-            "limit": context["annotation_limit"],
-        },
-    )
-    context[bind_name] = [VariantAnnotation(**item) for item in annotation_result["annotations"]]
-    context["used_tools"].append("annotation_tool")
-
-
-def _fallback_annotation_step(context: dict[str, Any], bind_name: str) -> None:
-    path = str(context["source_vcf_path"])
-    facts: AnalysisFacts = context["facts"]
-    context[bind_name] = annotate_variants(
-        path,
-        facts,
-        scope=context["annotation_scope"],
-        limit=context["annotation_limit"],
-    )
-
-
-def _execute_roh_step(context: dict[str, Any], bind_name: str) -> None:
-    path = str(context["source_vcf_path"])
-    roh_result = run_tool("roh_analysis_tool", {"vcf_path": path})
-    context[bind_name] = [RohSegment(**item) for item in roh_result["roh_segments"]]
-    context["used_tools"].append("roh_analysis_tool")
-
-
-def _fallback_roh_step(context: dict[str, Any], bind_name: str) -> None:
-    path = str(context["source_vcf_path"])
-    context[bind_name] = run_roh_analysis(path)
-
-
-def _execute_candidate_ranking_step(context: dict[str, Any], bind_name: str) -> None:
-    candidate_result = run_tool(
-        "candidate_ranking_tool",
-        {
-            "annotations": [item.model_dump() for item in context["annotations"]],
-            "roh_segments": [item.model_dump() for item in context["roh_segments"]],
-            "limit": 8,
-        },
-    )
-    context[bind_name] = [RankedCandidate(**item) for item in candidate_result["candidate_variants"]]
-    context["used_tools"].append("candidate_ranking_tool")
-
-
-def _fallback_candidate_ranking_step(context: dict[str, Any], bind_name: str) -> None:
-    context[bind_name] = build_ranked_candidates(context["annotations"], context["roh_segments"], limit=8)
-
-
-def _execute_clinvar_review_step(context: dict[str, Any], bind_name: str) -> None:
-    clinvar_result = run_tool(
-        "clinvar_review_tool",
-        {"annotations": [item.model_dump() for item in context["annotations"]]},
-    )
-    context[bind_name] = [CountSummaryItem(**item) for item in clinvar_result["clinvar_summary"]]
-    context["used_tools"].append("clinvar_review_tool")
-
-
-def _fallback_clinvar_review_step(context: dict[str, Any], bind_name: str) -> None:
-    counts: dict[str, int] = {}
-    for item in context["annotations"]:
-        key = (
-            item.clinical_significance.strip()
-            if item.clinical_significance and item.clinical_significance != "."
-            else "Unreviewed"
-        )
-        counts[key] = counts.get(key, 0) + 1
-    context[bind_name] = [
-        CountSummaryItem(label=label, count=count)
-        for label, count in sorted(counts.items(), key=lambda part: part[1], reverse=True)
-    ]
-
-
-def _execute_vep_consequence_step(context: dict[str, Any], bind_name: str) -> None:
-    consequence_result = run_tool(
-        "vep_consequence_tool",
-        {
-            "annotations": [item.model_dump() for item in context["annotations"]],
-            "limit": 10,
-        },
-    )
-    context[bind_name] = [CountSummaryItem(**item) for item in consequence_result["consequence_summary"]]
-    context["used_tools"].append("vep_consequence_tool")
-
-
-def _fallback_vep_consequence_step(context: dict[str, Any], bind_name: str) -> None:
-    counts: dict[str, int] = {}
-    for item in context["annotations"]:
-        key = item.consequence.strip() if item.consequence and item.consequence != "." else "Unclassified"
-        counts[key] = counts.get(key, 0) + 1
-    context[bind_name] = [
-        CountSummaryItem(label=label, count=count)
-        for label, count in sorted(counts.items(), key=lambda part: part[1], reverse=True)[:10]
-    ]
-
-
-def _execute_clinical_coverage_step(context: dict[str, Any], bind_name: str) -> None:
-    coverage_result = run_tool(
-        "clinical_coverage_tool",
-        {"annotations": [item.model_dump() for item in context["annotations"]]},
-    )
-    context[bind_name] = [DetailedCountSummaryItem(**item) for item in coverage_result["clinical_coverage_summary"]]
-    context["used_tools"].append("clinical_coverage_tool")
-
-
-def _fallback_clinical_coverage_step(context: dict[str, Any], bind_name: str) -> None:
-    annotations = list(context["annotations"])
-    total = len(annotations)
-
-    def detail(label: str, count: int) -> DetailedCountSummaryItem:
-        percent = round((count / total) * 100) if total else 0
-        return DetailedCountSummaryItem(label=label, count=count, detail=f"{count}/{total} annotated ({percent}%)")
-
-    context[bind_name] = [
-        detail(
-            "ClinVar coverage",
-            sum(
-                1
-                for item in annotations
-                if (item.clinical_significance and item.clinical_significance != ".")
-                or (item.clinvar_conditions and item.clinvar_conditions != ".")
-            ),
-        ),
-        detail("gnomAD coverage", sum(1 for item in annotations if item.gnomad_af and item.gnomad_af != ".")),
-        detail("Gene mapping", sum(1 for item in annotations if item.gene and item.gene != ".")),
-        detail(
-            "HGVS coverage",
-            sum(1 for item in annotations if (item.hgvsc and item.hgvsc != ".") or (item.hgvsp and item.hgvsp != "."))
-        ),
-        detail("Protein change", sum(1 for item in annotations if item.hgvsp and item.hgvsp != ".")),
-    ]
-
-
-def _execute_filtering_view_step(context: dict[str, Any], bind_name: str) -> None:
-    filtering_result = run_tool(
-        "filtering_view_tool",
-        {"annotations": [item.model_dump() for item in context["annotations"]]},
-    )
-    context[bind_name] = [DetailedCountSummaryItem(**item) for item in filtering_result["filtering_summary"]]
-    context["used_tools"].append("filtering_view_tool")
-
-
-def _fallback_filtering_view_step(context: dict[str, Any], bind_name: str) -> None:
-    annotations = list(context["annotations"])
-    unique_genes = {item.gene.strip() for item in annotations if item.gene and item.gene.strip() not in {"", "."}}
-    clinvar_labeled = sum(1 for item in annotations if item.clinical_significance and item.clinical_significance != ".")
-    symbolic = sum(1 for item in annotations if any(alt.startswith("<") and alt.endswith(">") for alt in item.alts))
-    context[bind_name] = [
-        DetailedCountSummaryItem(
-            label="Annotated rows", count=len(annotations), detail=f"{len(annotations)} rows currently available in the triage table"
-        ),
-        DetailedCountSummaryItem(
-            label="Distinct genes", count=len(unique_genes), detail=f"{len(unique_genes)} genes represented in the annotated subset"
-        ),
-        DetailedCountSummaryItem(
-            label="ClinVar-labeled rows",
-            count=clinvar_labeled,
-            detail=f"{clinvar_labeled} rows contain a ClinVar-style significance label",
-        ),
-        DetailedCountSummaryItem(
-            label="Symbolic ALT rows",
-            count=symbolic,
-            detail=f"{symbolic} rows are symbolic ALT records that may need separate handling",
-        ),
-    ]
-
-
-def _execute_symbolic_alt_step(context: dict[str, Any], bind_name: str) -> None:
-    symbolic_result = run_tool(
-        "symbolic_alt_tool",
-        {"annotations": [item.model_dump() for item in context["annotations"]]},
-    )
-    context[bind_name] = SymbolicAltSummary(**symbolic_result["symbolic_alt_summary"])
-    context["used_tools"].append("symbolic_alt_tool")
-
-
-def _fallback_symbolic_alt_step(context: dict[str, Any], bind_name: str) -> None:
-    symbolic_items = [item for item in context["annotations"] if any(alt.startswith("<") and alt.endswith(">") for alt in item.alts)]
-    context[bind_name] = SymbolicAltSummary(
-        count=len(symbolic_items),
-        examples=[
-            {
-                "locus": f"{item.contig}:{item.pos_1based}",
-                "gene": item.gene or "",
-                "alts": item.alts,
-                "consequence": item.consequence or "",
-                "genotype": item.genotype or "",
-            }
-            for item in symbolic_items[:5]
-        ],
-    )
-
 
 VCF_CUSTOM_STEP_EXECUTORS: dict[str, Any] = {}
 
@@ -1094,18 +856,11 @@ def analyze_vcf_workflow(
     annotation_limit: int | None = None,
 ) -> AnalysisResponse:
     manifest = load_workflow_manifest("representative_vcf_review")
-    structured_steps = isinstance(manifest, dict) and isinstance(manifest.get("steps"), list) and all(
-        isinstance(step, dict) for step in manifest.get("steps", [])
-    )
-    if annotation_scope == "representative" and annotation_limit is None and structured_steps:
-        return _run_registered_vcf_workflow_from_manifest(
-            path,
-            manifest,
-            annotation_scope=annotation_scope,
-            annotation_limit=annotation_limit,
-        )
-    return _analyze_vcf_workflow_legacy(
+    if manifest is None:
+        raise ValueError("The representative_vcf_review workflow manifest is not available.")
+    return _run_registered_vcf_workflow_from_manifest(
         path,
+        manifest,
         annotation_scope=annotation_scope,
         annotation_limit=annotation_limit,
     )

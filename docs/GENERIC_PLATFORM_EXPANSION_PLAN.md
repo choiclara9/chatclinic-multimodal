@@ -294,6 +294,16 @@ Additional progress on branch `codex/generic_tool`:
 
 This does not make those steps fully pluginized yet, but it removes another source-specific executor registry from the main orchestration file.
 
+Additional progress on branch `codex/generic_tool`:
+
+- `analyze_vcf_workflow()` no longer falls back to the legacy hard-coded VCF path
+- representative VCF execution now goes through the structured manifest runner only
+
+Remaining cleanup:
+
+- delete the now-dead `_analyze_vcf_workflow_legacy()` body
+- remove dead VCF helper functions that were only serving the legacy path
+
 ## Stage 6. Convert Upload Bootstrap Into Workflow-Driven Source Initialization
 
 ### Objective
