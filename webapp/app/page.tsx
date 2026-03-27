@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import IgvBrowser from "./components/IgvBrowser";
+import { buildStudioRendererRegistry } from "./components/studioRenderers";
 
 type TranscriptAnnotation = {
   transcript_id: string;
@@ -3157,7 +3158,7 @@ export default function Page() {
           ? [{ id: "prs_prep" as StudioView, title: "PRS Prep Review", subtitle: "Build check, harmonization, and score-file readiness" }]
           : []),
         ];
-  const studioRendererRegistry: Partial<Record<StudioView, () => React.ReactNode>> = {
+  const _legacyStudioRendererRegistry: Partial<Record<StudioView, () => React.ReactNode>> = {
     rawqc: () =>
       rawQcAnalysis ? (
         <section className="notebookPanel studioCanvasPanel">
@@ -4424,7 +4425,70 @@ export default function Page() {
         </section>
       ) : null,
   };
-  const registeredStudioRenderer = activeStudioView ? studioRendererRegistry[activeStudioView] : null;
+  const externalStudioRendererRegistry = buildStudioRendererRegistry({
+    apiBase,
+    analysis,
+    rawQcAnalysis,
+    summaryStatsAnalysis,
+    prsPrepResultForStudio,
+    qqmanResultForStudio,
+    samtoolsResultForStudio,
+    snpeffResultForStudio,
+    plinkResultForStudio,
+    liftoverResultForStudio,
+    ldblockshowResultForStudio,
+    summaryStatsGridRows,
+    summaryStatsRowsLoading,
+    summaryStatsHasMore,
+    summaryStatsGridRef,
+    handleSummaryStatsGridScroll,
+    loadMoreSummaryStatsRows,
+    candidateVariants,
+    searchedAnnotations,
+    setSelectedAnnotationIndex,
+    setActiveStudioView,
+    buildAcmgHints,
+    annotationScope,
+    annotationLimit,
+    qcMetrics,
+    clinicalCoverage,
+    plinkConfig,
+    setPlinkConfig,
+    plinkCommandPreview,
+    handleRunPlink,
+    plinkRunning,
+    activeSource,
+    attachedFile,
+    filteringSummary,
+    annotationSearch,
+    setAnnotationSearch,
+    symbolicAnnotations,
+    rohCandidates,
+    recessiveShortlist,
+    clinvarCounts,
+    consequenceCounts,
+    geneCounts,
+    safeSelectedIndex,
+    selectedAnnotation,
+    components: {
+      StudioMetricGrid,
+      StudioPreviewTable,
+      WarningListCard,
+      ArtifactLinksRow,
+      StudioSimpleList,
+      DistributionList,
+      VariantTable,
+      MetricTile,
+      ReferenceListCard,
+      AnnotationDetailCard,
+    },
+    helpers: {
+      formatPercent,
+      formatNumber,
+      summarizeLabel,
+    },
+  });
+  const registeredStudioRenderer = activeStudioView ? externalStudioRendererRegistry[activeStudioView] : null;
   const studioContext = useMemo(() => {
     if (!analysis) {
       return {};
