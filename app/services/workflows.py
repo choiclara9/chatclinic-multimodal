@@ -39,6 +39,63 @@ PLUGINS_DIR = ROOT_DIR / "plugins"
 WORKFLOWS_DIR = ROOT_DIR / "skills" / "chatgenome-orchestrator" / "workflows"
 
 
+def _normalize_workflow_step(step: object, workflow_name: str) -> dict[str, object]:
+    if not isinstance(step, dict):
+        raise ValueError(f"Workflow {workflow_name} contains a non-object step.")
+    tool_name = str(step.get("tool") or "").strip()
+    bind_name = str(step.get("bind") or "").strip()
+    if not tool_name:
+        raise ValueError(f"Workflow {workflow_name} contains a step without `tool`.")
+    if not bind_name:
+        raise ValueError(f"Workflow {workflow_name} step `{tool_name}` is missing `bind`.")
+    needs = [str(item).strip() for item in step.get("needs", []) if str(item).strip()]
+    normalized: dict[str, object] = {
+        "tool": tool_name,
+        "bind": bind_name,
+        "needs": needs,
+    }
+    on_fail = str(step.get("on_fail") or "").strip().lower()
+    if on_fail:
+        normalized["on_fail"] = on_fail
+    return normalized
+
+
+def _normalize_workflow_manifest(payload: dict[str, object]) -> dict[str, object]:
+    workflow_name = str(payload.get("name") or "").strip()
+    source_type = str(payload.get("source_type") or "").strip().lower()
+    requested_view = str(payload.get("requested_view") or payload.get("default_view") or "").strip()
+    response_kind = str(payload.get("response_kind") or "").strip().lower()
+    answer_template = str(payload.get("answer_template") or "").strip()
+    steps = payload.get("steps")
+
+    if not workflow_name:
+        raise ValueError("Workflow manifest is missing `name`.")
+    if not source_type:
+        raise ValueError(f"Workflow {workflow_name} is missing `source_type`.")
+    if not requested_view:
+        raise ValueError(f"Workflow {workflow_name} is missing `requested_view`.")
+    if not response_kind:
+        raise ValueError(f"Workflow {workflow_name} is missing `response_kind`.")
+    if not answer_template:
+        raise ValueError(f"Workflow {workflow_name} is missing `answer_template`.")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError(f"Workflow {workflow_name} does not define a valid non-empty step list.")
+
+    normalized_steps = [_normalize_workflow_step(step, workflow_name) for step in steps]
+    normalized_manifest = dict(payload)
+    normalized_manifest["name"] = workflow_name
+    normalized_manifest["source_type"] = source_type
+    normalized_manifest["requested_view"] = requested_view
+    normalized_manifest["response_kind"] = response_kind
+    normalized_manifest["answer_template"] = answer_template
+    normalized_manifest["steps"] = normalized_steps
+    normalized_manifest.setdefault("requires", [])
+    normalized_manifest.setdefault("produces", [])
+    normalized_manifest.setdefault("notes", [])
+    normalized_manifest["default_view"] = requested_view
+    return normalized_manifest
+
+
 @lru_cache(maxsize=1)
 def load_workflow_manifests() -> list[dict[str, object]]:
     manifests: list[dict[str, object]] = []
@@ -48,7 +105,10 @@ def load_workflow_manifests() -> list[dict[str, object]]:
         except Exception:
             continue
         if isinstance(payload, dict):
-            manifests.append(payload)
+            try:
+                manifests.append(_normalize_workflow_manifest(payload))
+            except Exception:
+                continue
     return manifests
 
 
@@ -1330,15 +1390,7 @@ def run_registered_raw_qc_workflow(
             "The active raw-QC session does not expose a durable source file path, so this workflow cannot be rerun from chat."
         )
 
-    structured_steps = isinstance(manifest.get("steps"), list) and all(
-        isinstance(step, dict) for step in manifest.get("steps", [])
-    )
-    if structured_steps:
-        return _run_registered_raw_qc_workflow_from_manifest(analysis, manifest)
-
-    raise NotImplementedError(
-        f"Workflow {workflow_name} does not define a structured raw-QC step manifest and cannot be executed."
-    )
+    return _run_registered_raw_qc_workflow_from_manifest(analysis, manifest)
 
 
 def analyze_summary_stats_workflow(
@@ -1380,12 +1432,4 @@ def run_registered_summary_stats_workflow(
             "The active summary-statistics session does not expose a durable source file path, so this workflow cannot be rerun from chat."
         )
 
-    structured_steps = isinstance(manifest.get("steps"), list) and all(
-        isinstance(step, dict) for step in manifest.get("steps", [])
-    )
-    if structured_steps:
-        return _run_registered_summary_stats_workflow_from_manifest(analysis, manifest)
-
-    raise NotImplementedError(
-        f"Workflow {workflow_name} does not define a structured summary-statistics step manifest and cannot be executed."
-    )
+    return _run_registered_summary_stats_workflow_from_manifest(analysis, manifest)

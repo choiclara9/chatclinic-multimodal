@@ -171,6 +171,27 @@ Treat workflows as structured batch files that define tool execution order.
 
 - Workflow manifests are the authoritative execution definition.
 
+### Current Status
+
+Partially completed on branch `codex/generic_tool`:
+
+- all current workflow manifests use structured object steps
+- workflow manifests now carry:
+  - `source_type`
+  - `requested_view`
+  - `response_kind`
+  - `answer_template`
+- workflow loading normalizes and validates:
+  - `tool`
+  - `bind`
+  - `needs`
+  - optional `on_fail`
+
+Remaining work for later stages:
+
+- eliminate remaining workflow-name special handling in `workflows.py`
+- move more execution behavior from runners into manifest + tool metadata
+
 ## Stage 4. Make Workflow Step Execution Metadata-First
 
 ### Objective
