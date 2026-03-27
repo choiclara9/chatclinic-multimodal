@@ -61,6 +61,25 @@ def _require_success(name: str, completed: subprocess.CompletedProcess[str]) -> 
     return completed.stdout
 
 
+def _header_has_sq_lines(executable: Path, input_path: Path) -> bool:
+    header_command = [str(executable), "view", "-H", str(input_path)]
+    completed = _run_command(header_command, cwd=ROOT_DIR, timeout=30)
+    if completed.returncode != 0:
+        return True
+    return any(line.startswith("@SQ") for line in completed.stdout.splitlines())
+
+
+def _validate_alignment_header(executable: Path, input_path: Path, file_kind: str) -> None:
+    if file_kind not in {"SAM", "BAM", "CRAM"}:
+        return
+    if _header_has_sq_lines(executable, input_path):
+        return
+    raise RuntimeError(
+        "The alignment header does not contain any @SQ sequence dictionary lines, so samtools QC cannot run. "
+        "Re-export the file with a complete reference header or convert it to a BAM/CRAM with proper @SQ entries first."
+    )
+
+
 def _parse_flagstat(text: str) -> dict[str, float | int]:
     metrics: dict[str, float | int] = {}
     for raw_line in text.splitlines():
@@ -151,6 +170,7 @@ def run_samtools(request: SamtoolsRequest) -> SamtoolsResponse:
 
     display_name = request.original_name or input_path.name
     file_kind = _detect_alignment_kind(input_path, display_name)
+    _validate_alignment_header(executable, input_path, file_kind)
     output_dir = SAMTOOLS_OUTPUT_DIR / uuid.uuid4().hex
     output_dir.mkdir(parents=True, exist_ok=True)
 
