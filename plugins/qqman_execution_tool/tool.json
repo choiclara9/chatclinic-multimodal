@@ -34,6 +34,9 @@
     "endpoint": "qqman",
     "argument_mode": "key_value",
     "requested_view": "qqman",
+    "studio": {
+      "renderer": "qqman"
+    },
     "result_kind": "qqman_result"
   },
   "help": {

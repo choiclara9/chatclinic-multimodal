@@ -3,6 +3,9 @@
   "description": "Run the default representative VCF interpretation workflow on the active VCF source.",
   "source_type": "vcf",
   "requested_view": "summary",
+  "studio": {
+    "renderer": "candidates"
+  },
   "response_kind": "analysis_chat",
   "answer_template": "The {workflow_name} workflow was rerun on the active source.\n\n- Workflow: `{workflow_name}`\n- Active file: `{active_file}`\n- Logged tools: {logged_tools}\n- Candidate variants: {candidate_count}\n\nThe active VCF analysis state has been refreshed. Open Studio cards or ask follow-up questions. Use `$studio ...` if you want the answer grounded in the current VCF review state.",
   "requires": [

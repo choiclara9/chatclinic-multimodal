@@ -34,6 +34,9 @@
     "endpoint": "plink",
     "argument_mode": "mode_or_key_value",
     "requested_view": "plink",
+    "studio": {
+      "renderer": "plink"
+    },
     "result_kind": "plink_result",
     "modes": ["qc", "score"],
     "default_mode": "qc"

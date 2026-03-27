@@ -34,6 +34,9 @@
     "endpoint": "samtools",
     "argument_mode": "key_value",
     "requested_view": "rawqc",
+    "studio": {
+      "renderer": "samtools"
+    },
     "result_kind": "samtools_result"
   },
   "help": {

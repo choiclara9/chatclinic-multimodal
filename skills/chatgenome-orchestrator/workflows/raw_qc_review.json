@@ -3,6 +3,9 @@
   "description": "Run the default raw sequencing QC workflow on the active FASTQ, BAM, or SAM source.",
   "source_type": "raw_qc",
   "requested_view": "rawqc",
+  "studio": {
+    "renderer": "rawqc"
+  },
   "response_kind": "raw_qc_chat",
   "answer_template": "The {workflow_name} workflow was rerun on the active source.\n\n- Workflow: `{workflow_name}`\n- Active file: `{active_file}`\n- Logged tools: {logged_tools}\n- Modules: {module_count}\n\nThe raw-QC state has been refreshed. Use `@samtools` for additional alignment review on compatible sources, or `$studio ...` for grounded explanation of the current Studio state.",
   "requires": [

@@ -34,6 +34,9 @@
     "endpoint": "snpeff",
     "argument_mode": "key_value",
     "requested_view": "snpeff",
+    "studio": {
+      "renderer": "snpeff"
+    },
     "result_kind": "snpeff_result"
   },
   "workflow_binding": {

@@ -34,6 +34,9 @@
     "endpoint": "liftover",
     "argument_mode": "key_value",
     "requested_view": "liftover",
+    "studio": {
+      "renderer": "liftover"
+    },
     "result_kind": "liftover_result"
   },
   "help": {

@@ -34,6 +34,9 @@
     "endpoint": "ldblockshow",
     "argument_mode": "region_or_key_value",
     "requested_view": "ldblockshow",
+    "studio": {
+      "renderer": "ldblockshow"
+    },
     "result_kind": "ldblockshow_result"
   },
   "help": {
