@@ -6,11 +6,15 @@ from plugins.cadd_lookup_tool.logic import enrich_annotations_with_cadd
 from plugins.candidate_ranking_tool.logic import build_ranked_candidates
 from plugins.revel_lookup_tool.logic import enrich_annotations_with_revel
 from plugins.roh_analysis_tool.logic import run_roh_analysis
+from plugins.vcf_qc_tool.logic import summarize_vcf
 
 
 def execute(payload: dict[str, object]) -> dict[str, object]:
     vcf_path = str(payload["vcf_path"])
-    facts = AnalysisFacts(**payload["facts"])
+    if "facts" in payload and payload.get("facts") is not None:
+        facts = AnalysisFacts(**payload["facts"])
+    else:
+        facts = summarize_vcf(vcf_path, max_examples=int(payload.get("max_examples", 8)))
     scope = str(payload.get("scope", "representative"))
     annotation_limit = payload.get("annotation_limit")
     ranking_limit = int(payload.get("ranking_limit", 8))

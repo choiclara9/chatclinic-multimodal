@@ -339,6 +339,13 @@ type SummaryStatsResponse = {
   }>;
 };
 
+type ToolRunResponse = {
+  tool_name: string;
+  alias: string;
+  result: Record<string, any>;
+  studio?: Record<string, any> | null;
+};
+
 type SummaryStatsRowsResponse = {
   rows: Array<Record<string, string>>;
   offset: number;
@@ -2214,6 +2221,127 @@ export default function Page() {
           `- Genome: ${payload?.genome || "unknown"}\n` +
           `- Parsed preview records: ${payload?.parsed_records?.length ?? 0}\n` +
           `- Output: ${payload?.output_path || "n/a"}`,
+      });
+      return;
+    }
+
+    if ((alias === "vcfinterpretation" || alias === "vcf_interpretation") && preAnalysisSource.source_type === "vcf") {
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/tools/vcf_interpretation/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            vcf_path: preAnalysisSource.source_path,
+            facts: analysis?.source_vcf_path === preAnalysisSource.source_path ? analysis.facts : undefined,
+            scope: "representative",
+            ranking_limit: 8,
+          },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload = (await response.json()) as ToolRunResponse;
+      setAnalysis((current) => {
+        const baseFacts =
+          current?.source_vcf_path === preAnalysisSource.source_path && current?.facts
+            ? current.facts
+            : (payload.result?.facts as AnalysisResponse["facts"] | undefined) ?? current?.facts;
+        if (!baseFacts) {
+          return current;
+        }
+        return {
+          analysis_id: current?.analysis_id ?? `vcf-interpretation-${Date.now()}`,
+          source_vcf_path: preAnalysisSource.source_path,
+          draft_answer: current?.draft_answer ?? "",
+          facts: baseFacts,
+          annotations: (payload.result?.annotations as VariantAnnotation[]) ?? current?.annotations ?? [],
+          snpeff_result: current?.snpeff_result ?? null,
+          plink_result: current?.plink_result ?? null,
+          liftover_result: current?.liftover_result ?? null,
+          ldblockshow_result: current?.ldblockshow_result ?? null,
+          candidate_variants: (payload.result?.candidate_variants as AnalysisResponse["candidate_variants"]) ?? current?.candidate_variants ?? [],
+          clinvar_summary: current?.clinvar_summary ?? [],
+          consequence_summary: current?.consequence_summary ?? [],
+          clinical_coverage_summary: current?.clinical_coverage_summary ?? [],
+          filtering_summary: current?.filtering_summary ?? [],
+          symbolic_alt_summary: current?.symbolic_alt_summary,
+          roh_segments: (payload.result?.roh_segments as AnalysisResponse["roh_segments"]) ?? current?.roh_segments ?? [],
+          references: current?.references ?? [],
+          used_tools: [
+            ...new Set([...(current?.used_tools ?? []), "vcf_interpretation_tool"]),
+          ],
+          tool_registry: current?.tool_registry ?? toolRegistry ?? [],
+        };
+      });
+      activateStudioFromPayload({ requested_view: "candidates", studio: { renderer: "candidates" } }, "candidates");
+      setStatus(toolReadyStatus(alias, remainder));
+      addMessage({
+        role: "assistant",
+        content:
+          `VCF interpretation was run for the active VCF.\n\n` +
+          `- Annotations: ${payload.result?.annotation_count ?? "unknown"}\n` +
+          `- ROH segments: ${payload.result?.roh_segment_count ?? "unknown"}\n` +
+          `- Ranked candidates: ${payload.result?.candidate_count ?? "unknown"}\n` +
+          `- CADD matched: ${payload.result?.cadd_matched_count ?? 0}\n` +
+          `- REVEL matched: ${payload.result?.revel_matched_count ?? 0}`,
+      });
+      return;
+    }
+
+    if ((alias === "vcfreview" || alias === "vcf_review") && preAnalysisSource.source_type === "vcf") {
+      if (!analysis?.annotations?.length) {
+        addMessage({
+          role: "assistant",
+          content: "VCF review needs interpreted annotations first. Run `@vcfinterpretation` before `@vcfreview`.",
+        });
+        setStatus(toolReadyStatus(alias, remainder));
+        return;
+      }
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/tools/vcf_review/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          payload: {
+            facts: analysis.facts,
+            annotations: analysis.annotations,
+            candidate_variants: analysis.candidate_variants ?? [],
+            references: analysis.references ?? [],
+          },
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload = (await response.json()) as ToolRunResponse;
+      setAnalysis((current) =>
+        current
+          ? {
+              ...current,
+              clinvar_summary: (payload.result?.clinvar_summary as AnalysisResponse["clinvar_summary"]) ?? current.clinvar_summary,
+              consequence_summary: (payload.result?.consequence_summary as AnalysisResponse["consequence_summary"]) ?? current.consequence_summary,
+              clinical_coverage_summary:
+                (payload.result?.clinical_coverage_summary as AnalysisResponse["clinical_coverage_summary"]) ??
+                current.clinical_coverage_summary,
+              symbolic_alt_summary:
+                (payload.result?.symbolic_alt_summary as AnalysisResponse["symbolic_alt_summary"]) ?? current.symbolic_alt_summary,
+              draft_answer: typeof payload.result?.draft_answer === "string" ? payload.result.draft_answer : current.draft_answer,
+              candidate_variants:
+                (payload.result?.candidate_variants as AnalysisResponse["candidate_variants"]) ?? current.candidate_variants,
+              used_tools: [...new Set([...(current.used_tools ?? []), "vcf_review_tool"])],
+            }
+          : current,
+      );
+      activateStudioFromPayload({ requested_view: "clinvar", studio: { renderer: "clinvar" } }, "clinvar");
+      setStatus(toolReadyStatus(alias, remainder));
+      addMessage({
+        role: "assistant",
+        content:
+          `VCF review was run for the active interpretation state.\n\n` +
+          `- ClinVar buckets: ${Array.isArray(payload.result?.clinvar_summary) ? payload.result.clinvar_summary.length : 0}\n` +
+          `- Consequence buckets: ${Array.isArray(payload.result?.consequence_summary) ? payload.result.consequence_summary.length : 0}\n` +
+          `- Coverage rows: ${Array.isArray(payload.result?.clinical_coverage_summary) ? payload.result.clinical_coverage_summary.length : 0}\n` +
+          `- Symbolic ALT count: ${payload.result?.symbolic_alt_summary?.count ?? 0}`,
       });
       return;
     }
