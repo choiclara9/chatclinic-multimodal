@@ -211,8 +211,8 @@ class BaseSourceResponse(BaseModel):
 
 class AnalysisResponse(BaseSourceResponse):
     facts: AnalysisFacts
-    annotations: list[VariantAnnotation]
-    roh_segments: list[RohSegment]
+    annotations: list[VariantAnnotation] = []
+    roh_segments: list[RohSegment] = []
     source_vcf_path: Optional[str] = None
     snpeff_result: Optional[SnpEffResponse] = None
     plink_result: Optional[PlinkResponse] = None
@@ -224,9 +224,9 @@ class AnalysisResponse(BaseSourceResponse):
     clinical_coverage_summary: list[DetailedCountSummaryItem] = []
     filtering_summary: list[DetailedCountSummaryItem] = []
     symbolic_alt_summary: Optional[SymbolicAltSummary] = None
-    references: list[ReferenceItem]
-    recommendations: list[RecommendationItem]
-    ui_cards: list[dict[str, Any]]
+    references: list[ReferenceItem] = []
+    recommendations: list[RecommendationItem] = []
+    ui_cards: list[dict[str, Any]] = []
 
 
 class AnalysisJobResponse(BaseModel):
