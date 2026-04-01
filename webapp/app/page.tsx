@@ -2887,6 +2887,22 @@ export default function Page() {
       return;
     }
 
+    // @help intercept — show tool guide from SKILL.md (works without a source)
+    if (/^@help\s*$/i.test(text)) {
+      addMessage({ role: "user", content: text });
+      setComposerText("");
+      try {
+        const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/help`);
+        if (!response.ok) throw new Error(await response.text());
+        const payload = (await response.json()) as { message: string };
+        addMessage({ role: "assistant", content: payload.message });
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : String(caught);
+        addMessage({ role: "assistant", content: `@help 조회 중 오류가 발생했습니다: ${message}` });
+      }
+      return;
+    }
+
     if (!hasAttachedSource) {
       addMessage({ role: "user", content: text });
       addMessage({

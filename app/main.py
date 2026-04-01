@@ -144,25 +144,28 @@ PLUGINS_DIR = ROOT_DIR / "plugins"
 SKILL_MD_PATH = ROOT_DIR / "skills" / "chatgenome-orchestrator" / "SKILL.md"
 
 
-def _read_skill_welcome_message() -> str:
-    """Extract the Welcome message section from SKILL.md."""
-    fallback = "Upload a source file to get started."
+def _read_skill_section(heading: str, fallback: str = "") -> str:
+    """Extract a named ## section from SKILL.md, preserving blank lines."""
     if not SKILL_MD_PATH.exists():
         return fallback
     text = SKILL_MD_PATH.read_text(encoding="utf-8")
-    marker = "## Welcome message"
+    marker = f"## {heading}"
     idx = text.find(marker)
     if idx == -1:
         return fallback
     after = text[idx + len(marker):]
-    # Collect lines until the next heading (##)
     lines: list[str] = []
+    started = False
     for line in after.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("##") and lines:
+        if line.strip().startswith("## ") and not line.strip().startswith("### ") and started:
             break
-        if stripped:
-            lines.append(stripped)
+        if not started and not line.strip():
+            continue
+        started = True
+        lines.append(line)
+    # Trim trailing blank lines
+    while lines and not lines[-1].strip():
+        lines.pop()
     return "\n".join(lines) if lines else fallback
 
 
@@ -476,7 +479,12 @@ def health() -> dict[str, str]:
 
 @app.get("/api/v1/welcome")
 def get_welcome_message() -> dict[str, str]:
-    return {"message": _read_skill_welcome_message()}
+    return {"message": _read_skill_section("Welcome message", "Upload a source file to get started.")}
+
+
+@app.get("/api/v1/help")
+def get_help_message() -> dict[str, str]:
+    return {"message": _read_skill_section("Help message", "@help 정보를 불러올 수 없습니다.")}
 
 
 @app.get("/api/v1/tools", response_model=list[ToolInfo])

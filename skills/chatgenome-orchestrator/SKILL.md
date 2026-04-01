@@ -9,7 +9,60 @@ This skill defines the intended orchestration layer for `ChatGenome`.
 
 ## Welcome message
 
-Upload a source file to get started. Supported formats: DICOM images, PNG/JPG/TIFF images, FHIR clinical bundles (.fhir.json, .fhir.xml, .ndjson), VCF (variant interpretation), Excel workbooks, text/markdown notes, FASTQ/BAM/SAM (raw sequencing QC), and summary statistics. The appropriate tools will run automatically after upload.
+Upload a source file to get started. Supported formats: DICOM images, PNG/JPG/TIFF images, FHIR clinical bundles (.fhir.json, .fhir.xml, .ndjson), VCF (variant interpretation), Excel workbooks, text/markdown notes, FASTQ/BAM/SAM (raw sequencing QC), and summary statistics. The appropriate tools will run automatically after upload. Type `@help` for detailed tool options and usage tips.
+
+## Help message
+
+### Available tools by source type
+
+**DICOM**
+- Auto: DICOM Review (metadata, series summary, preview)
+
+**PNG / JPG / TIFF Image**
+- Auto: Image Review (metadata, EXIF, thumbnail)
+
+**FHIR Bundle**
+- Auto: FHIR Browser (patient, medications, labs, care team)
+
+**Excel Workbook**
+- Auto: Cohort Browser (sheets, schema, missingness)
+
+**Text / Markdown**
+- Auto: Text Review (preview, grounded summary)
+
+**VCF (Variant Interpretation)**
+- `@liftover [target=hg38]` — Convert genome build (hg19 ↔ hg38)
+- `@snpeff [genome=GRCh38.mane.1.2.105]` — Run local SnpEff variant annotation
+- `@plink [mode=qc|score]` — PLINK 2 QC or PRS scoring
+- `@ldblockshow chr:start:end` — LD heatmap for a genomic region
+- Auto: QC Summary, Annotation, ClinVar Review, VEP Consequence, Candidate Ranking, ROH Analysis, CADD/REVEL Enrichment, Grounded Summary
+
+**FASTQ / BAM / SAM (Raw Sequencing QC)**
+- `@samtools [mode=qc]` — samtools flagstat / stats / idxstats alignment QC
+- Auto: FastQC Review
+
+**Summary Statistics (GWAS)**
+- `@qqman` — Manhattan plot + QQ plot
+- `@prs_prep` — Build check, harmonization, score-file preparation
+- Auto: Summary Stats Review (column detection, schema mapping)
+
+### Tips
+
+- `@toolname help` — Show detailed options for any tool
+- `@help` — Show this guide
+
+### Studio grounding
+
+Use these prefixes to get answers grounded in the current analysis state:
+
+- `$studio` — Interpret the active Studio cards
+- `$current analysis` — Summarize the current analysis artifacts
+- `$current card` — Explain the currently open card
+- `$grounded` — Answer from tool-derived state only
+
+Without a grounding prefix, questions are answered as general knowledge.
+
+
 
 ## Purpose
 
