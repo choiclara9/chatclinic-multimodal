@@ -1790,6 +1790,67 @@ def _call_openai_multimodal(payload: MultimodalChatRequest) -> MultimodalChatRes
         "dicom": (DicomChatRequest, payload.dicom_analysis),
     }
 
+    # Build per-source studio contexts from the merged studioContext.
+    # The frontend puts VCF keys at extra top-level, and source-specific
+    # data under extra.spreadsheet, extra.dicom, etc.
+    raw_sc = {}
+    if payload.studio_context:
+        if isinstance(payload.studio_context, StudioContextPayload):
+            raw_sc = {**payload.studio_context.model_dump(exclude_none=True), **(getattr(payload.studio_context, "model_extra", None) or {})}
+        elif isinstance(payload.studio_context, dict):
+            raw_sc = dict(payload.studio_context)
+    merged_extra = raw_sc.get("extra") or {}
+    if not isinstance(merged_extra, dict):
+        merged_extra = {}
+
+    def _build_source_studio_context(source_type: str) -> dict | None:
+        """Reconstruct a source-specific studio context from the merged one."""
+        base = {"active_view": raw_sc.get("active_view")}
+        if source_type == "vcf":
+            # VCF keys live at merged_extra top level
+            for k in ("qc_summary", "clinical_coverage", "symbolic_alt_review",
+                       "roh_review", "candidate_variants", "clinvar_review",
+                       "vep_consequence", "snpeff_preview", "selected_annotation",
+                       "filtering_summary", "liftover_preview", "ldblockshow_preview",
+                       "plink_preview"):
+                if k in merged_extra:
+                    base[k] = merged_extra[k]
+            for k in ("current_card", "current_summary", "current_preview", "current_warnings"):
+                if k in raw_sc:
+                    base[k] = raw_sc[k]
+            return base if len(base) > 1 else None
+        elif source_type == "spreadsheet":
+            src = merged_extra.get("spreadsheet") or {}
+            if not isinstance(src, dict):
+                return None
+            for k in ("sheet_count", "selected_sheet", "sheet_names", "sheet_details", "current_sheet"):
+                if k in src:
+                    base[k] = src[k]
+            # Reconstruct current_card/current_summary from sheet data
+            if src.get("current_sheet"):
+                base["current_card"] = src["current_sheet"]
+                base["current_summary"] = {
+                    "selected_sheet": src.get("selected_sheet"),
+                    "overview": src["current_sheet"].get("overview"),
+                    "intake": src["current_sheet"].get("intake"),
+                    "composition": src["current_sheet"].get("composition"),
+                }
+                base["current_preview"] = {
+                    "columns": src["current_sheet"].get("preview_columns", []),
+                    "rows": src["current_sheet"].get("preview_rows", []),
+                }
+            return base if len(base) > 1 else None
+        elif source_type == "dicom":
+            src = merged_extra.get("dicom") or {}
+            if not isinstance(src, dict):
+                return None
+            base["current_card"] = src.get("current_card")
+            base["current_summary"] = src.get("current_summary")
+            base["extra"] = {"metadata_items": src.get("metadata_items"), "series": src.get("series"), "preview": src.get("preview")}
+            return base if len(base) > 1 else None
+        # For other source types, pass the raw context as-is
+        return raw_sc if raw_sc else None
+
     for source_type, (req_cls, analysis_obj) in _REQUEST_CLS.items():
         if analysis_obj is None:
             continue
@@ -1797,12 +1858,15 @@ def _call_openai_multimodal(payload: MultimodalChatRequest) -> MultimodalChatRes
         if not config:
             continue
         try:
-            single = req_cls(
+            source_sc = _build_source_studio_context(source_type)
+            kwargs: dict[str, Any] = dict(
                 question=payload.question,
                 analysis=analysis_obj,
                 history=payload.history,
-                studio_context=payload.studio_context,
             )
+            if source_sc:
+                kwargs["studio_context"] = source_sc
+            single = req_cls(**kwargs)
             compact = config["compact_context_builder"](single)
             label = config["context_label"]
             section_json = json.dumps(compact, ensure_ascii=False)
