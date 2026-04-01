@@ -7,6 +7,10 @@ description: Use when ChatGenome should decide which genomics analysis tools to 
 
 This skill defines the intended orchestration layer for `ChatGenome`.
 
+## Welcome message
+
+Upload a source file to get started. Supported formats: DICOM images, PNG/JPG/TIFF images, FHIR clinical bundles (.fhir.json, .fhir.xml, .ndjson), VCF (variant interpretation), Excel workbooks, text/markdown notes, FASTQ/BAM/SAM (raw sequencing QC), and summary statistics. The appropriate tools will run automatically after upload.
+
 ## Purpose
 
 Use this skill when deciding which registered genomics tool should be used for a user request or an upload workflow.

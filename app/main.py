@@ -141,6 +141,29 @@ app.add_middleware(
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 PLUGINS_DIR = ROOT_DIR / "plugins"
+SKILL_MD_PATH = ROOT_DIR / "skills" / "chatgenome-orchestrator" / "SKILL.md"
+
+
+def _read_skill_welcome_message() -> str:
+    """Extract the Welcome message section from SKILL.md."""
+    fallback = "Upload a source file to get started."
+    if not SKILL_MD_PATH.exists():
+        return fallback
+    text = SKILL_MD_PATH.read_text(encoding="utf-8")
+    marker = "## Welcome message"
+    idx = text.find(marker)
+    if idx == -1:
+        return fallback
+    after = text[idx + len(marker):]
+    # Collect lines until the next heading (##)
+    lines: list[str] = []
+    for line in after.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##") and lines:
+            break
+        if stripped:
+            lines.append(stripped)
+    return "\n".join(lines) if lines else fallback
 
 
 def _load_tool_manifests() -> list[dict[str, object]]:
@@ -451,10 +474,14 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/api/v1/welcome")
+def get_welcome_message() -> dict[str, str]:
+    return {"message": _read_skill_welcome_message()}
+
+
 @app.get("/api/v1/tools", response_model=list[ToolInfo])
 def list_registry_tools() -> list[ToolInfo]:
     return discover_tools()
-
 
 
 @app.get("/api/v1/tools/help")

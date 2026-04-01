@@ -1273,8 +1273,7 @@ export default function Page() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "assistant",
-      content:
-        "Upload a source file to get started. Supported formats: VCF (variant interpretation), FASTQ/BAM/SAM (raw sequencing QC), summary statistics, Excel workbooks, text/markdown notes, DICOM images, PNG/JPG/TIFF images, and FHIR clinical bundles (.fhir.json, .fhir.xml, .ndjson). The appropriate tools will run automatically after upload.",
+      content: "",
     },
   ]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
@@ -1517,6 +1516,29 @@ export default function Page() {
       window.clearInterval(retryTimer);
     };
   }, [apiBase, toolRegistry?.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadWelcome() {
+      try {
+        const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/welcome`);
+        if (!response.ok) return;
+        const payload = (await response.json()) as { message: string };
+        if (!cancelled && payload.message) {
+          setMessages((prev) => {
+            if (prev.length === 1 && prev[0].role === "assistant" && !prev[0].content) {
+              return [{ role: "assistant", content: payload.message }];
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // Keep fallback empty message if backend unavailable.
+      }
+    }
+    void loadWelcome();
+    return () => { cancelled = true; };
+  }, [apiBase]);
 
   function addMessage(message: ChatMessage) {
     setMessages((current) => [...current, message]);
@@ -1869,7 +1891,13 @@ export default function Page() {
       return;
     }
     else if (!hadPreparedPrsScoreFile) {
-      await handleStartAnalysis("representative", annotationLimit, file, { silent: true });
+      const vcfPayload = await handleStartAnalysis("representative", annotationLimit, file, { silent: true });
+      if (vcfPayload) {
+        addMessage({
+          role: "assistant",
+          content: `VCF source \`${file.name}\` is loaded and analyzed automatically. Open the Studio QC Summary card to inspect quality metrics and annotations.`,
+        });
+      }
     }
     else {
       setStatus("VCF source ready");
@@ -4760,8 +4788,6 @@ export default function Page() {
                                 : src.sourceType === "dicom" ? "DICOM"
                                 : src.sourceType === "text" ? "Text"
                                 : src.sourceType === "summary_stats" ? "Summary Stats"
-                                : src.sourceType === "image" ? "Image"
-                                : src.sourceType === "fhir" ? "FHIR"
                                 : src.sourceType;
                               return (
                                 <article key={`src-${idx}`} className="sourceItem" style={{ opacity: 0.9, marginBottom: 4 }}>
