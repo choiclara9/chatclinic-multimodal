@@ -1270,7 +1270,7 @@ button {
 
 .sourceSplitPanel {
   display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 14px;
   height: 100%;
   min-height: 0;

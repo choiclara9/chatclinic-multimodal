@@ -4786,46 +4786,6 @@ export default function Page() {
                 </div>
               </section>
 
-              <section className="sourceSplitSection">
-                <div className="sourceSectionHeader">
-                  <h3>Tool Registry</h3>
-                </div>
-                <div className="sourceSectionBody">
-                  <div className="toolRegistryDetails">
-                    <button
-                      type="button"
-                      className="toolRegistrySummary"
-                      onClick={() => setToolRegistryOpen((current) => !current)}
-                    >
-                      Available tools
-                      <span className="toolRegistryCount">
-                        {activeToolRegistry?.length
-                          ? activeToolRegistry.length
-                          : toolRegistryLoading
-                            ? "…"
-                            : 0}
-                      </span>
-                    </button>
-                    {toolRegistryOpen ? (
-                      <div className="toolRegistryMenu">
-                        {activeToolRegistry?.length ? (
-                          activeToolRegistry.map((tool) => (
-                            <div key={tool.name} className="toolRegistryItem" title={tool.description}>
-                              <span className="toolRegistryName">{displayToolAlias(tool.name)}</span>
-                              <span className="toolRegistryTask">{tool.task}</span>
-                            </div>
-                          ))
-                        ) : toolRegistryLoading ? (
-                          <p className="toolRegistryEmpty">Loading tool registry from the local backend...</p>
-                        ) : (
-                          <p className="toolRegistryEmpty">Tool registry is currently unavailable from the local backend.</p>
-                        )}
-                      </div>
-                    ) : null}
-                  </div>
-
-                </div>
-              </section>
             </div>
           </div>
         </aside>
