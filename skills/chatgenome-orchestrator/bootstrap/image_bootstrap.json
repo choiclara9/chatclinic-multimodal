@@ -1,0 +1,6 @@
+{
+  "name": "image_bootstrap",
+  "source_type": "image",
+  "runner": "image",
+  "upload_subdir": "image"
+}

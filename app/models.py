@@ -433,6 +433,31 @@ class DicomChatResponse(BaseChatResponse):
     analysis: Optional[DicomSourceResponse] = None
 
 
+class ImageSourceResponse(BaseSourceResponse):
+    source_image_path: Optional[str] = None
+    file_name: str = ""
+    file_kind: str = "IMAGE"
+    width: int = 0
+    height: int = 0
+    format_name: str = ""
+    color_mode: str = ""
+    bit_depth: Optional[int] = None
+    exif_data: dict[str, Any] = Field(default_factory=dict)
+    metadata_items: list[dict[str, Any]] = []
+    studio_cards: list[dict[str, Any]] = []
+    artifacts: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    preview_data_url: Optional[str] = None
+
+
+class ImageChatRequest(BaseChatRequest):
+    analysis: ImageSourceResponse
+
+
+class ImageChatResponse(BaseChatResponse):
+    analysis: Optional[ImageSourceResponse] = None
+
+
 class PrsPrepBuildCheck(BaseModel):
     inferred_build: str = "unknown"
     build_confidence: str = "low"
@@ -491,7 +516,7 @@ class WorkflowAgentResponse(BaseModel):
 
 
 class SourceReadyResponse(BaseModel):
-    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet", "dicom"]
+    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet", "dicom", "image"]
     file_name: str
     source_path: str
     file_kind: Optional[str] = None
@@ -505,6 +530,7 @@ class MultimodalChatRequest(BaseChatRequest):
     text_analysis: Optional[TextSourceResponse] = None
     spreadsheet_analysis: Optional[SpreadsheetSourceResponse] = None
     dicom_analysis: Optional[DicomSourceResponse] = None
+    image_analysis: Optional[ImageSourceResponse] = None
     primary_source_type: Optional[str] = None
 
 
@@ -520,7 +546,7 @@ class MultimodalChatResponse(BaseChatResponse):
 
 
 class SourceChatRequest(BaseModel):
-    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet", "dicom"]
+    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet", "dicom", "image"]
     question: str
     analysis_payload: dict[str, Any]
     history: list[ChatTurn] = []
@@ -528,7 +554,7 @@ class SourceChatRequest(BaseModel):
 
 
 class SourceChatResponse(BaseModel):
-    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet", "dicom"]
+    source_type: Literal["vcf", "raw_qc", "summary_stats", "text", "spreadsheet", "dicom", "image"]
     answer: str
     citations: list[str]
     used_fallback: bool

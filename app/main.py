@@ -18,6 +18,9 @@ from app.models import (
     DicomChatRequest,
     DicomChatResponse,
     DicomSourceResponse,
+    ImageChatRequest,
+    ImageChatResponse,
+    ImageSourceResponse,
     GatkLiftoverVcfRequest,
     GatkLiftoverVcfResponse,
     LDBlockShowRequest,
@@ -64,6 +67,7 @@ from app.models import (
 from app.services.chat import (
     answer_analysis_chat,
     answer_dicom_chat,
+    answer_image_chat,
     answer_multimodal_chat,
     answer_raw_qc_chat,
     answer_source_chat,
@@ -592,6 +596,11 @@ def chat_about_dicom(request: DicomChatRequest) -> DicomChatResponse:
     return answer_dicom_chat(request)
 
 
+@app.post("/api/v1/chat/image", response_model=ImageChatResponse)
+def chat_about_image(request: ImageChatRequest) -> ImageChatResponse:
+    return answer_image_chat(request)
+
+
 @app.post("/api/v1/chat/spreadsheet", response_model=SpreadsheetChatResponse)
 def chat_about_spreadsheet(request: SpreadsheetChatRequest) -> SpreadsheetChatResponse:
     return answer_spreadsheet_chat(request)
@@ -734,6 +743,18 @@ async def analyze_dicom_upload(file: UploadFile = File(...)) -> DicomSourceRespo
         await file.read(),
         DicomSourceResponse,
         "Unexpected bootstrap response type for DICOM upload.",
+    )
+
+
+@app.post("/api/v1/image/upload", response_model=ImageSourceResponse)
+async def analyze_image_upload(file: UploadFile = File(...)) -> ImageSourceResponse:
+    filename = file.filename or "image.png"
+    return _typed_bootstrap_upload(
+        "image",
+        filename,
+        await file.read(),
+        ImageSourceResponse,
+        "Unexpected bootstrap response type for image upload.",
     )
 
 

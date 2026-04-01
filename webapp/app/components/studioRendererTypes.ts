@@ -13,6 +13,7 @@ export type StudioRendererBuilderArgs = {
   dicomAnalysis: any;
   spreadsheetAnalysis: any;
   textAnalysis: any;
+  imageAnalysis: any;
   prsPrepResultForStudio: any;
   qqmanResultForStudio: any;
   samtoolsResultForStudio: any;

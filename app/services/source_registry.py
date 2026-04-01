@@ -14,6 +14,25 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 SOURCE_REGISTRY: dict[str, dict[str, Any]] = {
+    "image": {
+        "upload_label": "image file",
+        "dedicated_upload_detail": "Only PNG, JPG, JPEG, TIFF, TIF, BMP, and WEBP image uploads are supported.",
+        "upload_endpoint": "image",
+        "bootstrap_source_type": "image",
+        "chat_response_kind": "image",
+        "default_result_kind": "image_analysis",
+        "default_requested_view": "image_review",
+        "studio_renderer": "image_review",
+        "studio_card_kind": "image_browser",
+        "studio_preview_kind": "image_preview",
+        "initial_tools": ["image_review_tool"],
+        "capabilities": ["source_upload", "bootstrap_analysis", "grounded_chat"],
+        "suffixes": [".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp"],
+        "file_kind_map": {
+            ".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG",
+            ".tiff": "TIFF", ".tif": "TIFF", ".bmp": "BMP", ".webp": "WEBP",
+        },
+    },
     "dicom": {
         "upload_label": "DICOM file",
         "dedicated_upload_detail": "Only DICOM uploads such as .dcm and .dicom are supported.",

@@ -445,6 +445,37 @@ type DicomChatResponse = {
   analysis?: DicomSourceResponse | null;
 };
 
+type ImageSourceResponse = {
+  analysis_id: string;
+  source_image_path?: string | null;
+  file_name: string;
+  file_kind: string;
+  width: number;
+  height: number;
+  format_name: string;
+  color_mode: string;
+  bit_depth?: number | null;
+  exif_data: Record<string, any>;
+  metadata_items: Array<Record<string, any>>;
+  studio_cards: Array<Record<string, any>>;
+  artifacts: Record<string, any>;
+  warnings: string[];
+  preview_data_url?: string | null;
+  draft_answer: string;
+  used_tools: string[];
+  tool_registry: AnalysisResponse["tool_registry"];
+};
+
+type ImageChatResponse = {
+  answer: string;
+  citations: string[];
+  used_fallback: boolean;
+  result_kind?: string | null;
+  requested_view?: StudioView | null;
+  studio?: { renderer?: string | null } | null;
+  analysis?: ImageSourceResponse | null;
+};
+
 type RPlotResponse = {
   tool: string;
   input_path: string;
@@ -486,13 +517,13 @@ type RawQcChatResponse = {
 };
 
 type SourceReadyResponse = {
-  source_type: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom";
+  source_type: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | "image";
   file_name: string;
   source_path: string;
   file_kind?: string | null;
 };
 
-type SessionMode = "prs" | "vcf_analysis" | "raw_sequence" | "text_review" | "spreadsheet_review" | "imaging_review";
+type SessionMode = "prs" | "vcf_analysis" | "raw_sequence" | "text_review" | "spreadsheet_review" | "imaging_review" | "image_review";
 
 type PrsPrepResponse = {
   analysis_id: string;
@@ -565,7 +596,8 @@ type StudioView =
   | "vep"
   | "references"
   | "igv"
-  | "annotations";
+  | "annotations"
+  | "image_review";
 
 type RohStudioSegment = {
   label: string;
@@ -629,6 +661,19 @@ function isSpreadsheetFileName(fileName: string) {
 function isDicomFileName(fileName: string) {
   const lowered = fileName.toLowerCase();
   return lowered.endsWith(".dcm") || lowered.endsWith(".dicom");
+}
+
+function isImageFileName(fileName: string) {
+  const lowered = fileName.toLowerCase();
+  return (
+    lowered.endsWith(".png") ||
+    lowered.endsWith(".jpg") ||
+    lowered.endsWith(".jpeg") ||
+    lowered.endsWith(".tiff") ||
+    lowered.endsWith(".tif") ||
+    lowered.endsWith(".bmp") ||
+    lowered.endsWith(".webp")
+  );
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -1189,7 +1234,7 @@ export default function Page() {
     {
       role: "assistant",
       content:
-        "Upload a source file to get started. Supported formats: VCF (variant interpretation), FASTQ/BAM/SAM (raw sequencing QC), summary statistics, Excel workbooks, text/markdown notes, and DICOM images. The appropriate tools will run automatically after upload.",
+        "Upload a source file to get started. Supported formats: VCF (variant interpretation), FASTQ/BAM/SAM (raw sequencing QC), summary statistics, Excel workbooks, text/markdown notes, DICOM images, and PNG/JPG/TIFF images. The appropriate tools will run automatically after upload.",
     },
   ]);
   const [analysis, setAnalysis] = useState<AnalysisResponse | null>(null);
@@ -1198,11 +1243,12 @@ export default function Page() {
   const [dicomAnalysis, setDicomAnalysis] = useState<DicomSourceResponse | null>(null);
   const [spreadsheetAnalysis, setSpreadsheetAnalysis] = useState<SpreadsheetSourceResponse | null>(null);
   const [textAnalysis, setTextAnalysis] = useState<TextSourceResponse | null>(null);
+  const [imageAnalysis, setImageAnalysis] = useState<ImageSourceResponse | null>(null);
   const [summaryStatsGridRows, setSummaryStatsGridRows] = useState<Array<Record<string, string>>>([]);
   const [summaryStatsHasMore, setSummaryStatsHasMore] = useState(false);
   const [summaryStatsRowsLoading, setSummaryStatsRowsLoading] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | null>(null);
+  const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | "image" | null>(null);
   const [activeSource, setActiveSource] = useState<SourceReadyResponse | null>(null);
   const [uploadedSources, setUploadedSources] = useState<Array<{ name: string; sourceType: string; timestamp: number }>>([]);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
@@ -1215,6 +1261,7 @@ export default function Page() {
     if (src === "text") return "text_review";
     if (src === "spreadsheet") return "spreadsheet_review";
     if (src === "dicom") return "imaging_review";
+    if (src === "image") return "image_review";
     return null;
   }, [attachedSourceType]);
   const [pendingUploadRole, setPendingUploadRole] = useState<"default" | "prs_summary" | "prs_target">("default");
@@ -1260,7 +1307,7 @@ export default function Page() {
   const summaryStatsGridRef = useRef<HTMLDivElement | null>(null);
   const sessionModeModality =
     sessionMode === "vcf_analysis" || sessionMode === "raw_sequence" || sessionMode === "prs" ? "genomics"
-    : sessionMode === "imaging_review" ? "medical-image"
+    : sessionMode === "imaging_review" || sessionMode === "image_review" ? "medical-image"
     : sessionMode === "spreadsheet_review" ? "spreadsheet"
     : sessionMode === "text_review" ? "text"
     : null;
@@ -1278,8 +1325,10 @@ export default function Page() {
             ? spreadsheetAnalysis.tool_registry
           : textAnalysis?.tool_registry?.length
             ? textAnalysis.tool_registry
+          : imageAnalysis?.tool_registry?.length
+            ? imageAnalysis.tool_registry
           : toolRegistry;
-    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && sessionModeModality) {
+    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && !imageAnalysis && sessionModeModality) {
       return (base ?? []).filter((t) => t.modality === sessionModeModality);
     }
     return base;
@@ -1490,6 +1539,8 @@ export default function Page() {
         ? "raw_qc"
         : isDicomFileName(file.name)
           ? "dicom"
+        : isImageFileName(file.name)
+          ? "image"
         : isSpreadsheetFileName(file.name)
           ? "spreadsheet"
         : isTextFileName(file.name)
@@ -1510,6 +1561,8 @@ export default function Page() {
         ? "Uploading spreadsheet source..."
         : guessedSourceType === "dicom"
           ? "Uploading DICOM source..."
+        : guessedSourceType === "image"
+          ? "Uploading image source..."
         : guessedSourceType === "text"
           ? "Uploading text source..."
           : guessedSourceType === "summary_stats"
@@ -1551,6 +1604,8 @@ export default function Page() {
       setSpreadsheetAnalysis(null);
     } else if (guessedSourceType === "text") {
       setTextAnalysis(null);
+    } else if (guessedSourceType === "image") {
+      setImageAnalysis(null);
     }
     setFollowUpAnswer(null);
     // Multimodal: preserve chat history and studio view across source uploads.
@@ -1561,6 +1616,29 @@ export default function Page() {
     }
     setError(null);
     try {
+      if (guessedSourceType === "image") {
+        const payload = await handleStartImageReview(file, { silent: true });
+        if (!payload) {
+          event.target.value = "";
+          setPendingUploadRole("default");
+          return;
+        }
+        setActiveSource({
+          source_type: "image",
+          file_name: payload.file_name,
+          source_path: payload.source_image_path ?? "",
+          file_kind: payload.file_kind,
+        });
+        setStatus("Image review ready");
+        addMessage({
+          role: "assistant",
+          content: `Image source \`${file.name}\` is loaded and reviewed automatically. Open the Studio Image Review card to inspect metadata, EXIF data, and thumbnail preview.`,
+        });
+        event.target.value = "";
+        setPendingUploadRole("default");
+        return;
+      }
+
       if (guessedSourceType === "text") {
         const payload = await handleStartTextReview(file, { silent: true });
         if (!payload) {
@@ -2404,6 +2482,51 @@ export default function Page() {
     }
   }
 
+  async function handleStartImageReview(
+    file: File,
+    options?: { silent?: boolean },
+  ): Promise<ImageSourceResponse | null> {
+    const silent = options?.silent ?? false;
+    setError(null);
+    setStatus("Running image review...");
+    if (!silent) {
+      addMessage({
+        role: "assistant",
+        content: "이미지 파일을 읽고 metadata, EXIF, thumbnail을 추출하고 있습니다.",
+        kind: "status",
+      });
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/image/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const payload: ImageSourceResponse = await response.json();
+      setImageAnalysis(payload);
+      activateStudioFromPayload(payload, "image_review", "image");
+      setStatus("Image review ready");
+      setComposerText("");
+      return payload;
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setError(message);
+      setStatus("Image review failed");
+      addMessage({
+        role: "assistant",
+        content: `Image review 중 오류가 발생했습니다: ${message}`,
+      });
+      return null;
+    }
+  }
+
   async function handleStartSpreadsheetReview(
     file: File,
     options?: { silent?: boolean },
@@ -2659,7 +2782,7 @@ export default function Page() {
       return;
     }
 
-    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis) {
+    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && !imageAnalysis) {
       addMessage({ role: "user", content: text });
       setComposerText("");
       addMessage({
@@ -2670,7 +2793,7 @@ export default function Page() {
     }
 
     // Count active sources — use multimodal endpoint when >1 source is loaded
-    const activeSourceCount = [analysis, rawQcAnalysis, summaryStatsAnalysis, dicomAnalysis, spreadsheetAnalysis, textAnalysis].filter(Boolean).length;
+    const activeSourceCount = [analysis, rawQcAnalysis, summaryStatsAnalysis, dicomAnalysis, spreadsheetAnalysis, textAnalysis, imageAnalysis].filter(Boolean).length;
 
     if (activeSourceCount > 1) {
       setComposerText("");
@@ -2712,6 +2835,12 @@ export default function Page() {
     if (spreadsheetAnalysis) {
       setComposerText("");
       await handleAskSpreadsheetQuestion(text);
+      return;
+    }
+
+    if (imageAnalysis) {
+      setComposerText("");
+      await handleAskImageQuestion(text);
       return;
     }
 
@@ -3135,6 +3264,48 @@ export default function Page() {
     }
   }
 
+  async function handleAskImageQuestion(questionText?: string, analysisOverride?: ImageSourceResponse | null) {
+    const text = questionText?.trim() ?? "";
+    const activeAnalysis = analysisOverride ?? imageAnalysis;
+    if (!text || !activeAnalysis) {
+      return;
+    }
+
+    setStatus("Generating answer...");
+    setAnalysisQa((current) => [...current, { role: "user", content: text }]);
+
+    try {
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/chat/image`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: text,
+          analysis: activeAnalysis,
+          history: analysisQa.map((turn) => ({ role: turn.role, content: turn.content })),
+          studio_context: studioContext,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload: ImageChatResponse = await response.json();
+      if (payload.analysis) {
+        setImageAnalysis(payload.analysis);
+      }
+      activateStudioFromPayload(payload, "image_review", "image");
+      setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
+      setFollowUpAnswer(payload.answer);
+      setStatus("Answer ready");
+    } catch (caught) {
+      const msg = caught instanceof Error ? caught.message : String(caught);
+      setAnalysisQa((current) => [
+        ...current,
+        { role: "assistant", content: `설명 요청 중 오류가 발생했습니다: ${msg}` },
+      ]);
+      setStatus("Answer failed");
+    }
+  }
+
   async function handleAskMultimodalQuestion(questionText?: string) {
     const text = questionText?.trim() ?? "";
     if (!text) return;
@@ -3154,12 +3325,14 @@ export default function Page() {
           text_analysis: textAnalysis ?? undefined,
           spreadsheet_analysis: spreadsheetAnalysis ?? undefined,
           dicom_analysis: dicomAnalysis ?? undefined,
+          image_analysis: imageAnalysis ?? undefined,
           primary_source_type: (() => {
             // Infer focused source from active studio view
             const v = activeStudioView ?? "";
             if (typeof v === "string") {
               if (v.includes("cohort_browser") || v.startsWith("sheet::")) return "spreadsheet";
               if (v === "dicom_review" || v.startsWith("dicom")) return "dicom";
+              if (v === "image_review") return "image";
               if (v === "rawqc" || v === "samtools") return "raw_qc";
               if (v === "sumstats" || v === "qqman" || v === "prs_prep") return "summary_stats";
               if (v === "text") return "text";
@@ -3247,9 +3420,11 @@ export default function Page() {
         ? spreadsheetAnalysis.draft_answer
       : textAnalysis
         ? textAnalysis.draft_answer
+      : imageAnalysis
+        ? imageAnalysis.draft_answer
       : null;
   const displayedAnswer = followUpAnswer ?? summaryText;
-  const hasInteractiveState = Boolean(attachedFile || analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || messages.length > 1);
+  const hasInteractiveState = Boolean(attachedFile || analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || imageAnalysis || messages.length > 1);
   const latestStatusMessage =
     [...messages].reverse().find((message) => message.kind === "status" || message.kind === "summary")?.content ?? "";
   const sourceStatusDetail = useMemo(() => {
@@ -3437,7 +3612,7 @@ export default function Page() {
     status === "PLINK ready" ||
     status === "PLINK score ready"
       ? status
-      : analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis
+      : analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || imageAnalysis
         ? analysis
           ? "Analysis ready"
           : rawQcAnalysis
@@ -3450,10 +3625,12 @@ export default function Page() {
                   ? "Spreadsheet review ready"
                   : textAnalysis
                     ? "Text review ready"
-                    : "Analysis ready"
+                    : imageAnalysis
+                      ? "Image review ready"
+                      : "Analysis ready"
         : status;
   const summaryTurn =
-    analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis
+    analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || imageAnalysis
       ? [
           {
             role: "assistant" as const,
@@ -3683,6 +3860,7 @@ export default function Page() {
       spreadsheetAnalysis ||
       dicomAnalysis ||
       textAnalysis ||
+      imageAnalysis ||
       prsPrepResultForStudio ||
       qqmanResultForStudio ||
       snpeffResultForStudio ||
@@ -3803,6 +3981,21 @@ export default function Page() {
       cards.push({ id: "text" as StudioView, title: "Text Review", subtitle: "Preview and note-length summary" });
     }
 
+    // Image cards
+    if (imageAnalysis) {
+      if (imageAnalysis.studio_cards?.length) {
+        imageAnalysis.studio_cards.forEach((card) => {
+          cards.push({
+            id: String(card.id ?? "image_review") as StudioView,
+            title: String(card.title ?? "Image Review"),
+            subtitle: String(card.subtitle ?? "Metadata, EXIF, and thumbnail preview"),
+          });
+        });
+      } else {
+        cards.push({ id: "image_review" as StudioView, title: "Image Review", subtitle: "Metadata, EXIF, and thumbnail preview" });
+      }
+    }
+
     // Orphan direct tool results (no parent analysis loaded)
     if (!analysis && !rawQcAnalysis) {
       if (samtoolsResultForStudio) cards.push({ id: "samtools" as StudioView, title: "Samtools Review", subtitle: "Alignment QC summary" });
@@ -3827,6 +4020,7 @@ export default function Page() {
     dicomAnalysis,
     spreadsheetAnalysis,
     textAnalysis,
+    imageAnalysis,
     prsPrepResultForStudio,
     qqmanResultForStudio,
     samtoolsResultForStudio,
@@ -4173,7 +4367,36 @@ export default function Page() {
       };
     }
 
-    if (!analysis && !dicomAnalysis && !spreadsheetAnalysis) {
+    // --- Image source ---
+    if (imageAnalysis) {
+      if (!analysis && !dicomAnalysis && !spreadsheetAnalysis) {
+        merged.current_card = {
+          file_name: imageAnalysis.file_name,
+          format: imageAnalysis.format_name,
+          dimensions: `${imageAnalysis.width}×${imageAnalysis.height}`,
+        };
+        merged.current_summary = {
+          format_name: imageAnalysis.format_name,
+          color_mode: imageAnalysis.color_mode,
+          width: imageAnalysis.width,
+          height: imageAnalysis.height,
+          bit_depth: imageAnalysis.bit_depth,
+        };
+      }
+      allWarnings.push(...(Array.isArray(imageAnalysis.warnings) ? imageAnalysis.warnings.slice(0, 12) : []));
+      mergedExtra.image = {
+        file_name: imageAnalysis.file_name,
+        format_name: imageAnalysis.format_name,
+        color_mode: imageAnalysis.color_mode,
+        width: imageAnalysis.width,
+        height: imageAnalysis.height,
+        bit_depth: imageAnalysis.bit_depth,
+        exif_data: imageAnalysis.exif_data,
+        metadata_items: imageAnalysis.metadata_items,
+      };
+    }
+
+    if (!analysis && !dicomAnalysis && !spreadsheetAnalysis && !imageAnalysis) {
       return {};
     }
 
@@ -4186,6 +4409,7 @@ export default function Page() {
     analysis,
     dicomAnalysis,
     spreadsheetAnalysis,
+    imageAnalysis,
     candidateVariants,
     clinicalCoverage,
     filteringSummary,

@@ -314,6 +314,71 @@ function DicomReviewCard({
   );
 }
 
+function ImageReviewCard({
+  analysis,
+  components,
+}: {
+  analysis: any;
+  components: StudioRendererBuilderArgs["components"];
+}) {
+  const { StudioMetricGrid, WarningListCard } = components;
+  const exifEntries = Object.entries(analysis?.exif_data ?? {});
+
+  return (
+    <section className="notebookPanel studioCanvasPanel">
+      <div className="notebookHeader">
+        <h2>Image Review</h2>
+        <span className="pill">{analysis?.file_name ?? "image"}</span>
+      </div>
+      <div className="studioCanvasBody">
+        <StudioMetricGrid
+          items={[
+            { label: "Format", value: String(analysis?.format_name ?? "n/a"), tone: "good" },
+            { label: "Dimensions", value: `${analysis?.width ?? 0}×${analysis?.height ?? 0}`, tone: "neutral" },
+            { label: "Color mode", value: String(analysis?.color_mode ?? "n/a"), tone: "neutral" },
+            { label: "Bit depth", value: analysis?.bit_depth != null ? String(analysis.bit_depth) : "n/a", tone: "neutral" },
+            { label: "File kind", value: String(analysis?.file_kind ?? "IMAGE"), tone: "neutral" },
+          ]}
+        />
+        <div className="resultSectionSplit" style={{ gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", alignItems: "start" }}>
+          {analysis?.preview_data_url ? (
+            <article className="miniCard">
+              <h3>Thumbnail</h3>
+              <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+                <img
+                  src={analysis.preview_data_url}
+                  alt={analysis.file_name ?? "preview"}
+                  style={{ maxWidth: "100%", maxHeight: "400px", borderRadius: "6px", border: "1px solid var(--border-color, #ddd)" }}
+                />
+              </div>
+            </article>
+          ) : null}
+          <article className="miniCard" style={{ maxWidth: "100%", overflow: "hidden" }}>
+            <h3>{exifEntries.length ? "EXIF data" : "Metadata"}</h3>
+            <div className="variantTableWrap summaryStatsTableWrap">
+              <table className="variantTable summaryStatsTable">
+                <tbody>
+                  <tr><th>File</th><td>{String(analysis?.file_name ?? "n/a")}</td></tr>
+                  <tr><th>Format</th><td>{String(analysis?.format_name ?? "n/a")}</td></tr>
+                  <tr><th>Size</th><td>{analysis?.width ?? 0}×{analysis?.height ?? 0} px</td></tr>
+                  <tr><th>Color</th><td>{String(analysis?.color_mode ?? "n/a")}</td></tr>
+                  {exifEntries.slice(0, 12).map(([key, value]) => (
+                    <tr key={key}><th>{key}</th><td>{String(value ?? "")}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+        <WarningListCard
+          warnings={Array.isArray(analysis?.warnings) ? analysis.warnings : []}
+          emptyLabel="No image warnings."
+        />
+      </div>
+    </section>
+  );
+}
+
 export function buildCustomStudioRendererRegistry({
   activeStudioView,
   apiBase,
@@ -329,6 +394,7 @@ export function buildCustomStudioRendererRegistry({
   attachedFile,
   dicomAnalysis,
   spreadsheetAnalysis,
+  imageAnalysis,
   candidateVariants,
   searchedAnnotations,
   setSelectedAnnotationIndex,
@@ -363,6 +429,10 @@ export function buildCustomStudioRendererRegistry({
     dicom_review: () =>
       dicomAnalysis ? (
         <DicomReviewCard analysis={dicomAnalysis} components={components} helpers={helpers} />
+      ) : null,
+    image_review: () =>
+      imageAnalysis ? (
+        <ImageReviewCard analysis={imageAnalysis} components={components} />
       ) : null,
     cohort_browser: () =>
       spreadsheetAnalysis ? (

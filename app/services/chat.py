@@ -14,6 +14,9 @@ from app.models import (
     DicomChatRequest,
     DicomChatResponse,
     DicomSourceResponse,
+    ImageChatRequest,
+    ImageChatResponse,
+    ImageSourceResponse,
     QqmanAssociationRequest,
     RawQcResponse,
     RawQcChatRequest,
@@ -281,6 +284,7 @@ SOURCE_CHAT_RESPONSE_CLASS: dict[str, type] = {
     "dicom": DicomChatResponse,
     "text": TextChatResponse,
     "spreadsheet": SpreadsheetChatResponse,
+    "image": ImageChatResponse,
 }
 
 
@@ -563,6 +567,16 @@ def answer_source_chat(payload: SourceChatRequest) -> SourceChatResponse:
             )
         )
         return _serialize_source_chat_response("spreadsheet", response)
+    if source_type == "image":
+        response = answer_image_chat(
+            ImageChatRequest(
+                question=payload.question,
+                analysis=ImageSourceResponse(**payload.analysis_payload),
+                history=payload.history,
+                studio_context=studio_context,
+            )
+        )
+        return _serialize_source_chat_response("image", response)
     raise NotImplementedError(f"Unsupported source chat type: {source_type}")
 
 
@@ -786,6 +800,30 @@ def _compact_spreadsheet_context(payload: SpreadsheetChatRequest) -> dict[str, o
     return context
 
 
+def _compact_image_context(payload: ImageChatRequest) -> dict[str, object]:
+    exif_summary = {}
+    for key in ("Make", "Model", "DateTime", "Software", "ImageWidth", "ImageLength", "GPS"):
+        if key in payload.analysis.exif_data:
+            exif_summary[key] = payload.analysis.exif_data[key]
+    context: dict[str, object] = {
+        "analysis_id": payload.analysis.analysis_id,
+        "file_name": payload.analysis.file_name,
+        "file_kind": payload.analysis.file_kind,
+        "width": payload.analysis.width,
+        "height": payload.analysis.height,
+        "format_name": payload.analysis.format_name,
+        "color_mode": payload.analysis.color_mode,
+        "bit_depth": payload.analysis.bit_depth,
+        "exif_summary": exif_summary,
+        "warnings": payload.analysis.warnings[:12],
+        "draft_answer": payload.analysis.draft_answer,
+        "used_tools": payload.analysis.used_tools,
+    }
+    if payload.studio_context:
+        context["studio_context"] = _flatten_studio_context(payload.studio_context)
+    return context
+
+
 CHAT_OPENAI_CONFIG: dict[str, dict[str, Any]] = {
     "vcf": {
         "context_label": "Analysis context JSON",
@@ -887,13 +925,28 @@ CHAT_OPENAI_CONFIG: dict[str, dict[str, Any]] = {
             "Answer from general knowledge only and ignore any uploaded workbook context unless the user explicitly asks with a grounding trigger such as $studio."
         ),
     },
+    "image": {
+        "context_label": "Image metadata context JSON",
+        "compact_context_builder": _compact_image_context,
+        "grounded_system_prompt": (
+            "You are an image metadata analysis copilot. "
+            "The user explicitly requested grounded reasoning via a trigger such as $studio or $current analysis. "
+            "Answer only from the provided image metadata (dimensions, format, EXIF, color mode) and do not invent information. "
+            "When EXIF data includes GPS coordinates, camera make/model, or timestamps, mention them explicitly."
+        ),
+        "general_system_prompt": (
+            "You are a helpful general assistant. "
+            "The user did not request grounded image reasoning. "
+            "Answer from general knowledge only."
+        ),
+    },
 }
 
 
 def _fallback_chat_answer(
     source_type: str,
     question: str,
-) -> AnalysisChatResponse | DicomChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
+) -> AnalysisChatResponse | DicomChatResponse | ImageChatResponse | RawQcChatResponse | SpreadsheetChatResponse | SummaryStatsChatResponse | TextChatResponse:
     if _has_studio_trigger(question):
         answer = (
             "I could not complete the grounded Studio response right now.\n\n"
@@ -1654,6 +1707,10 @@ def answer_spreadsheet_chat(payload: SpreadsheetChatRequest) -> SpreadsheetChatR
     return _answer_source_chat("spreadsheet", payload)
 
 
+def answer_image_chat(payload: ImageChatRequest) -> ImageChatResponse:
+    return _answer_source_chat("image", payload)
+
+
 def answer_multimodal_chat(payload: MultimodalChatRequest) -> MultimodalChatResponse:
     """Handle chat with merged context from all active sources."""
     # Determine primary source for @tool routing
@@ -1736,6 +1793,11 @@ def _multimodal_to_single(
             question=payload.question, analysis=payload.spreadsheet_analysis,
             history=payload.history, studio_context=payload.studio_context,
         )
+    if payload.image_analysis:
+        sources["image"] = ImageChatRequest(
+            question=payload.question, analysis=payload.image_analysis,
+            history=payload.history, studio_context=payload.studio_context,
+        )
     if preferred and preferred in sources:
         return preferred, sources[preferred]
     if sources:
@@ -1788,6 +1850,7 @@ def _call_openai_multimodal(payload: MultimodalChatRequest) -> MultimodalChatRes
         "text": (TextChatRequest, payload.text_analysis),
         "spreadsheet": (SpreadsheetChatRequest, payload.spreadsheet_analysis),
         "dicom": (DicomChatRequest, payload.dicom_analysis),
+        "image": (ImageChatRequest, payload.image_analysis),
     }
 
     # Build per-source studio contexts from the merged studioContext.
