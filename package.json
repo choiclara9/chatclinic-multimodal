@@ -5,7 +5,6 @@
     "webapp"
   ],
   "scripts": {
-    "check:static-frontend": "node --check frontend/app.js",
     "dev:webapp": "npm --workspace webapp run dev",
     "build:webapp": "npm --workspace webapp run build",
     "lint:webapp": "npm --workspace webapp run lint"

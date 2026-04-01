@@ -1684,27 +1684,7 @@ def _handle_at_tool_request_for_source(
 
 
 
-def _vcf_pre_chat_hook(payload: AnalysisChatRequest) -> AnalysisChatResponse | None:
-    """VCF-specific pre-chat checks (e.g. deprecated tool notices)."""
-    lowered = payload.question.lower()
-    if "opencravat" in lowered or "open cravat" in lowered:
-        return AnalysisChatResponse(
-            answer=(
-                "OpenCRAVAT is not available in this ChatGenome build.\n\n"
-                "- The OpenCRAVAT plugin and Studio card have been removed because the runtime was unstable.\n"
-                "- So this request did not run OpenCRAVAT.\n"
-                "- If you want additional deterministic annotation, please use the currently supported tools such as SnpEff, CADD lookup, or REVEL lookup."
-            ),
-            citations=[],
-            used_fallback=False,
-            used_tools=[],
-        )
-    return None
-
-
-_SOURCE_PRE_CHAT_HOOKS: dict[str, Any] = {
-    "vcf": _vcf_pre_chat_hook,
-}
+_SOURCE_PRE_CHAT_HOOKS: dict[str, Any] = {}
 
 
 def _answer_source_chat(source_type: str, payload: Any) -> Any:
