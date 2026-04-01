@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+  <!-- antenna -->
+  <line x1="32" y1="8" x2="32" y2="14" stroke="#64748b"/>
+  <circle cx="32" cy="6" r="2" fill="#f43f5e" stroke="#f43f5e"/>
+  <!-- head -->
+  <rect x="16" y="14" width="32" height="24" rx="8" ry="8" fill="#e0f2fe" stroke="#3b82f6"/>
+  <!-- eyes -->
+  <circle cx="25" cy="26" r="3" fill="#1e3a5f" stroke="none"/>
+  <circle cx="39" cy="26" r="3" fill="#1e3a5f" stroke="none"/>
+  <!-- eye shine -->
+  <circle cx="26.2" cy="25" r="1" fill="#fff" stroke="none"/>
+  <circle cx="40.2" cy="25" r="1" fill="#fff" stroke="none"/>
+  <!-- smile -->
+  <path d="M27 31 Q32 35 37 31" stroke="#3b82f6" fill="none" stroke-width="2"/>
+  <!-- ears -->
+  <rect x="10" y="22" width="6" height="8" rx="3" fill="#93c5fd" stroke="#3b82f6"/>
+  <rect x="48" y="22" width="6" height="8" rx="3" fill="#93c5fd" stroke="#3b82f6"/>
+  <!-- neck -->
+  <line x1="29" y1="38" x2="29" y2="42" stroke="#64748b"/>
+  <line x1="35" y1="38" x2="35" y2="42" stroke="#64748b"/>
+  <!-- body / white coat -->
+  <rect x="18" y="42" width="28" height="18" rx="6" ry="6" fill="#f0fdf4" stroke="#22c55e"/>
+  <!-- stethoscope tube -->
+  <path d="M26 47 C24 50, 23 54, 27 56" stroke="#f59e0b" fill="none" stroke-width="2"/>
+  <path d="M38 47 C40 50, 41 54, 38 56" stroke="#f59e0b" fill="none" stroke-width="2"/>
+  <!-- stethoscope chest piece -->
+  <circle cx="27" cy="57" r="2" fill="#f59e0b" stroke="#d97706"/>
+  <!-- stethoscope ear piece -->
+  <circle cx="38" cy="57" r="2.5" fill="none" stroke="#d97706" stroke-width="2"/>
+  <!-- cross on coat -->
+  <line x1="32" y1="48" x2="32" y2="54" stroke="#ef4444" stroke-width="2.5"/>
+  <line x1="29" y1="51" x2="35" y2="51" stroke="#ef4444" stroke-width="2.5"/>
+</svg>

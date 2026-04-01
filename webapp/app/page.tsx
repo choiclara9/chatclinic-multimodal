@@ -1204,6 +1204,8 @@ export default function Page() {
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | null>(null);
   const [activeSource, setActiveSource] = useState<SourceReadyResponse | null>(null);
+  const [uploadedSources, setUploadedSources] = useState<Array<{ name: string; sourceType: string; timestamp: number }>>([]);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const sessionMode: SessionMode | null = useMemo(() => {
     const src = attachedSourceType;
     if (!src) return null;
@@ -1498,6 +1500,11 @@ export default function Page() {
     setAttachedFile(file);
     setAttachedSourceType(guessedSourceType);
     setActiveSource(null);
+    // Track all uploaded sources for the source panel
+    setUploadedSources((prev) => {
+      const filtered = prev.filter((s) => s.sourceType !== guessedSourceType);
+      return [...filtered, { name: file.name, sourceType: guessedSourceType, timestamp: Date.now() }];
+    });
     setStatus(
       guessedSourceType === "spreadsheet"
         ? "Uploading spreadsheet source..."
@@ -3247,10 +3254,10 @@ export default function Page() {
     [...messages].reverse().find((message) => message.kind === "status" || message.kind === "summary")?.content ?? "";
   const sourceStatusDetail = useMemo(() => {
     if (status === "Generating answer...") {
-      return "ChatGenome is reading the current analysis and Studio results to prepare a grounded response.";
+      return "ChatClinic is reading the current analysis and Studio results to prepare a grounded response.";
     }
     if (status === "Preparing analysis...") {
-      return "The VCF is attached. ChatGenome is starting the default representative analysis run.";
+      return "The VCF is attached. ChatClinic is starting the default representative analysis run.";
     }
     if (status === "Analyzing") {
       return "Reading the VCF, attaching deterministic annotation, and preparing grounded outputs.";
@@ -3268,13 +3275,13 @@ export default function Page() {
       return "The DICOM source is being uploaded and prepared for metadata and preview review.";
     }
     if (status === "Running DICOM review...") {
-      return "The DICOM upload is complete. ChatGenome is extracting metadata, preview state, and series summary.";
+      return "The DICOM upload is complete. ChatClinic is extracting metadata, preview state, and series summary.";
     }
     if (status === "Uploading spreadsheet source...") {
       return "The workbook is being uploaded and prepared for sheet-level cohort review.";
     }
     if (status === "Running spreadsheet review...") {
-      return "The workbook upload is complete. ChatGenome is reading sheets and building cohort browser artifacts.";
+      return "The workbook upload is complete. ChatClinic is reading sheets and building cohort browser artifacts.";
     }
     if (status === "Uploading text source...") {
       return "The text source is being uploaded for note review.";
@@ -3364,7 +3371,7 @@ export default function Page() {
       return "DICOM intake failed. Check the file validity and preview dependencies such as pydicom, numpy, and Pillow.";
     }
     if (status === "Answer failed") {
-      return "The last chat response failed. Retry the question and ChatGenome will attempt the grounded explanation again.";
+      return "The last chat response failed. Retry the question and ChatClinic will attempt the grounded explanation again.";
     }
     if (status === "Liftover failed") {
       return "Liftover failed for the active VCF. Check the error details and genome-build inputs.";
@@ -4209,8 +4216,8 @@ export default function Page() {
     <main className="shell notebookShell">
       <header className="appTopbar">
         <div className="appBrand">
-          <img src="/chatgenome-dna.svg" alt="" className="appBrandIconImage" />
-          <span className="appBrandName">ChatGenome</span>
+          <img src="/chatclinic-logo.svg" alt="" className="appBrandIconImage" />
+          <span className="appBrandName">ChatClinic</span>
         </div>
         <div className="appCopyright">Copyright 2026. BISPL@KAIST AI, All rights reserved.</div>
       </header>
@@ -4237,7 +4244,7 @@ export default function Page() {
                     </div>
                   ) : (
                     <button type="button" className="sourceAddButton" onClick={() => handleAttachClick()}>
-                      + Add genomics source
+                      + Add source files
                     </button>
                   )}
                   <input
@@ -4264,26 +4271,54 @@ export default function Page() {
                           <span className="sourceBadge">T</span>
                         </article>
                       </>
-                    ) : attachedFile ? (
-                      <article className="sourceItem sourceItemActive">
-                        <div>
-                          <strong>{attachedFile.name}</strong>
-                          <p>
-                            {isRawQcFileName(attachedFile.name)
-                              ? "Active raw sequencing source"
-                              : isSpreadsheetFileName(attachedFile.name)
-                                ? "Active spreadsheet source"
-                              : isDicomFileName(attachedFile.name)
-                                ? "Active DICOM source"
-                              : isTextFileName(attachedFile.name)
-                                ? "Active text source"
-                              : isSummaryStatsFileName(attachedFile.name) && !isVcfFileName(attachedFile.name)
-                                ? "Active summary statistics source"
-                                : "Active VCF source"}
-                          </p>
-                        </div>
-                        <span className="sourceBadge">1</span>
-                      </article>
+                    ) : uploadedSources.length > 0 ? (
+                      <>
+                        <article
+                          className="sourceItem sourceItemActive"
+                          style={{ cursor: uploadedSources.length > 1 ? "pointer" : undefined }}
+                          onClick={() => uploadedSources.length > 1 && setSourcesExpanded((v) => !v)}
+                        >
+                          <div>
+                            <strong>{attachedFile?.name ?? uploadedSources[uploadedSources.length - 1].name}</strong>
+                            <p>
+                              {uploadedSources.length > 1
+                                ? `${uploadedSources.length} sources loaded`
+                                : (() => {
+                                    const st = uploadedSources[0].sourceType;
+                                    return st === "raw_qc" ? "Active raw sequencing source"
+                                      : st === "spreadsheet" ? "Active spreadsheet source"
+                                      : st === "dicom" ? "Active DICOM source"
+                                      : st === "text" ? "Active text source"
+                                      : st === "summary_stats" ? "Active summary statistics source"
+                                      : "Active VCF source";
+                                  })()}
+                            </p>
+                          </div>
+                          <span className="sourceBadge">{uploadedSources.length}</span>
+                        </article>
+                        {sourcesExpanded && uploadedSources.length > 1 && (
+                          <div className="sourceDropdownList" style={{ marginTop: 4, paddingLeft: 8 }}>
+                            {uploadedSources.map((src, idx) => {
+                              const typeLabel =
+                                src.sourceType === "vcf" ? "VCF"
+                                : src.sourceType === "raw_qc" ? "Raw QC"
+                                : src.sourceType === "spreadsheet" ? "Spreadsheet"
+                                : src.sourceType === "dicom" ? "DICOM"
+                                : src.sourceType === "text" ? "Text"
+                                : src.sourceType === "summary_stats" ? "Summary Stats"
+                                : src.sourceType;
+                              return (
+                                <article key={`src-${idx}`} className="sourceItem" style={{ opacity: 0.9, marginBottom: 4 }}>
+                                  <div>
+                                    <strong style={{ fontSize: "0.85em" }}>{src.name}</strong>
+                                    <p style={{ fontSize: "0.8em", margin: 0 }}>{typeLabel}</p>
+                                  </div>
+                                </article>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
                     ) : (
                       <div className="sourceEmpty">
                         <p>Upload a source file to begin. The session type is detected automatically.</p>
