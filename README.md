@@ -21,6 +21,7 @@ ChatClinic is a three-panel workspace: **Sources**, **Chat**, and **Studio**.
 |-------------|---------|------------|
 | **DICOM** | `.dcm`, `.dicom` | DICOM Review (metadata, series summary, preview) |
 | **Image** | `.png`, `.jpg`, `.jpeg`, `.tiff`, `.tif`, `.bmp`, `.webp` | Image Review (metadata, EXIF, thumbnail) |
+| **NIfTI** | `.nii`, `.nii.gz` | NIfTI Review (shape, voxel dims, orientation, 3D Niivue viewer) |
 | **FHIR Bundle** | `.fhir.json`, `.fhir.xml`, `.ndjson` | FHIR Browser (patient, medications, labs, care team) |
 | **Excel Workbook** | `.xlsx`, `.xls` | Cohort Browser (sheets, schema, missingness) |
 | **Text / Markdown** | `.txt`, `.md`, `.markdown` | Text Review (preview, grounded summary) |
