@@ -5,7 +5,6 @@ Before making changes, read:
 - [README.md](README.md)
 - [docs/DEVELOPER_MANUAL.md](docs/DEVELOPER_MANUAL.md)
 - [docs/TOOL_PLUGIN_GUIDE.md](docs/TOOL_PLUGIN_GUIDE.md)
-- [docs/REVISION_HISTORY.md](docs/REVISION_HISTORY.md)
 
 ## Local setup
 

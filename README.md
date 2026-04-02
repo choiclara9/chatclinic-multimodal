@@ -200,9 +200,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 - [docs/DEVELOPER_MANUAL.md](docs/DEVELOPER_MANUAL.md) — Full developer guide
 - [docs/TOOL_PLUGIN_GUIDE.md](docs/TOOL_PLUGIN_GUIDE.md) — Tool plugin reference
-- [docs/REVISION_HISTORY.md](docs/REVISION_HISTORY.md) — Architecture decision history
 - [docs/FRONTEND_RENDERER_INVENTORY.md](docs/FRONTEND_RENDERER_INVENTORY.md) — Studio renderer inventory
-- [docs/GENERIC_PLATFORM_EXPANSION_PLAN.md](docs/GENERIC_PLATFORM_EXPANSION_PLAN.md) — Platform expansion status
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Contributor setup and checklist
 
 ## Design Principle
