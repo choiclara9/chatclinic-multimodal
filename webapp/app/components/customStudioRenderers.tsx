@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo } from "react";
+import dynamic from "next/dynamic";
 
 import DicomInteractiveViewer from "./DicomInteractiveViewer";
 import IgvBrowser from "./IgvBrowser";
+
+const NiivueViewer = dynamic(() => import("./NiivueViewer"), { ssr: false });
 import { type StudioRendererBuilderArgs, type StudioRendererRegistry } from "./studioRendererTypes";
 
 function MetricBarList({
@@ -379,6 +382,81 @@ function ImageReviewCard({
   );
 }
 
+function NiftiReviewCard({
+  analysis,
+  apiBase,
+  components,
+}: {
+  analysis: any;
+  apiBase: string;
+  components: StudioRendererBuilderArgs["components"];
+}) {
+  const { StudioMetricGrid, WarningListCard } = components;
+  const shapeStr = analysis?.shape?.join(" × ") ?? "n/a";
+  const voxelStr = analysis?.voxel_dims?.slice(0, 3).join(" × ") ?? "n/a";
+  const fovStr = analysis?.fov_mm?.map((v: number) => v.toFixed(1)).join(" × ") ?? "n/a";
+  const niftiFileUrl = analysis?.source_nifti_path
+    ? `${apiBase.replace(/\/$/, "")}/api/v1/files?path=${encodeURIComponent(analysis.source_nifti_path)}`
+    : null;
+
+  return (
+    <section className="notebookPanel studioCanvasPanel">
+      <div className="notebookHeader">
+        <h2>NIfTI Review</h2>
+        <span className="pill">{analysis?.file_name ?? "nifti"}</span>
+      </div>
+      <div className="studioCanvasBody">
+        <StudioMetricGrid
+          items={[
+            { label: "Shape", value: shapeStr, tone: "good" },
+            { label: "Voxel (mm)", value: voxelStr, tone: "neutral" },
+            { label: "FOV (mm)", value: fovStr, tone: "neutral" },
+            { label: "Orientation", value: String(analysis?.orientation ?? "n/a"), tone: "neutral" },
+            { label: "Datatype", value: String(analysis?.datatype ?? "n/a"), tone: "neutral" },
+            { label: "4D volume", value: analysis?.is_4d ? "Yes" : "No", tone: analysis?.is_4d ? "warn" : "neutral" },
+          ]}
+        />
+        {niftiFileUrl ? (
+          <article className="miniCard">
+            <h3>Interactive Viewer</h3>
+            <NiivueViewer niftiUrl={niftiFileUrl} />
+          </article>
+        ) : analysis?.preview_data_url ? (
+          <article className="miniCard">
+            <h3>Slice Preview (Axial / Coronal / Sagittal)</h3>
+            <div style={{ textAlign: "center", padding: "0.5rem 0" }}>
+              <img
+                src={analysis.preview_data_url}
+                alt={analysis.file_name ?? "preview"}
+                style={{ maxWidth: "100%", maxHeight: "400px", borderRadius: "6px", border: "1px solid var(--border-color, #ddd)" }}
+              />
+            </div>
+          </article>
+        ) : null}
+        <article className="miniCard" style={{ maxWidth: "100%", overflow: "hidden" }}>
+          <h3>Metadata</h3>
+          <div className="variantTableWrap summaryStatsTableWrap">
+            <table className="variantTable summaryStatsTable">
+              <tbody>
+                <tr><th>File</th><td>{String(analysis?.file_name ?? "n/a")}</td></tr>
+                <tr><th>Shape</th><td>{shapeStr}</td></tr>
+                <tr><th>Voxel size</th><td>{voxelStr} mm</td></tr>
+                <tr><th>FOV</th><td>{fovStr} mm</td></tr>
+                <tr><th>Orientation</th><td>{String(analysis?.orientation ?? "n/a")}</td></tr>
+                <tr><th>Data type</th><td>{String(analysis?.datatype ?? "n/a")}</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+        <WarningListCard
+          warnings={Array.isArray(analysis?.warnings) ? analysis.warnings : []}
+          emptyLabel="No NIfTI warnings."
+        />
+      </div>
+    </section>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // FHIR helpers
 // ---------------------------------------------------------------------------
@@ -710,6 +788,7 @@ export function buildCustomStudioRendererRegistry({
   dicomAnalysis,
   spreadsheetAnalysis,
   imageAnalysis,
+  niftiAnalysis,
   fhirAnalysis,
   candidateVariants,
   searchedAnnotations,
@@ -749,6 +828,10 @@ export function buildCustomStudioRendererRegistry({
     image_review: () =>
       imageAnalysis ? (
         <ImageReviewCard analysis={imageAnalysis} components={components} />
+      ) : null,
+    nifti_review: () =>
+      niftiAnalysis ? (
+        <NiftiReviewCard analysis={niftiAnalysis} apiBase={apiBase} components={components} />
       ) : null,
     fhir_browser: () =>
       fhirAnalysis ? (

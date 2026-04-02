@@ -14,6 +14,7 @@ export type StudioRendererBuilderArgs = {
   spreadsheetAnalysis: any;
   textAnalysis: any;
   imageAnalysis: any;
+  niftiAnalysis: any;
   fhirAnalysis: any;
   prsPrepResultForStudio: any;
   qqmanResultForStudio: any;

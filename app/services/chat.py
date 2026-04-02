@@ -20,6 +20,9 @@ from app.models import (
     ImageChatRequest,
     ImageChatResponse,
     ImageSourceResponse,
+    NiftiChatRequest,
+    NiftiChatResponse,
+    NiftiSourceResponse,
     QqmanAssociationRequest,
     RawQcResponse,
     RawQcChatRequest,
@@ -288,6 +291,7 @@ SOURCE_CHAT_RESPONSE_CLASS: dict[str, type] = {
     "text": TextChatResponse,
     "spreadsheet": SpreadsheetChatResponse,
     "image": ImageChatResponse,
+    "nifti": NiftiChatResponse,
     "fhir": FhirChatResponse,
 }
 
@@ -1750,6 +1754,10 @@ def answer_spreadsheet_chat(payload: SpreadsheetChatRequest) -> SpreadsheetChatR
 
 def answer_image_chat(payload: ImageChatRequest) -> ImageChatResponse:
     return _answer_source_chat("image", payload)
+
+
+def answer_nifti_chat(payload: NiftiChatRequest) -> NiftiChatResponse:
+    return _answer_source_chat("nifti", payload)
 
 
 def answer_fhir_chat(payload: FhirChatRequest) -> FhirChatResponse:

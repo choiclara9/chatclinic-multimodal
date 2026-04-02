@@ -1,0 +1,25 @@
+{
+  "name": "nifti_review_tool",
+  "entrypoint": "plugins.nifti_review_tool.logic:execute",
+  "description": "Extract NIfTI metadata including shape, voxel dimensions, affine transform, orientation, and generate axial/coronal/sagittal slice previews.",
+  "task": "nifti_review",
+  "modality": "medical-image",
+  "source": "plugin",
+  "direct_chat": {
+    "response_kind": "nifti_chat",
+    "result_kind": "nifti_analysis",
+    "requested_view": "nifti_review",
+    "studio": {
+      "renderer": "nifti_review"
+    },
+    "source_types": [
+      "nifti"
+    ]
+  },
+  "source_types": [
+    "nifti"
+  ],
+  "initial_for": [
+    "nifti"
+  ]
+}

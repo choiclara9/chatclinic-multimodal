@@ -458,6 +458,32 @@ class ImageChatResponse(BaseChatResponse):
     analysis: Optional[ImageSourceResponse] = None
 
 
+class NiftiSourceResponse(BaseSourceResponse):
+    source_nifti_path: Optional[str] = None
+    file_name: str = ""
+    file_kind: str = "NIFTI"
+    shape: list[int] = Field(default_factory=list)
+    voxel_dims: list[float] = Field(default_factory=list)
+    affine_matrix: Optional[list[list[float]]] = None
+    datatype: str = ""
+    orientation: str = ""
+    is_4d: bool = False
+    fov_mm: list[float] = Field(default_factory=list)
+    metadata_items: list[dict[str, Any]] = []
+    studio_cards: list[dict[str, Any]] = []
+    artifacts: dict[str, dict[str, Any]] = {}
+    warnings: list[str] = []
+    preview_data_url: Optional[str] = None
+
+
+class NiftiChatRequest(BaseChatRequest):
+    analysis: NiftiSourceResponse
+
+
+class NiftiChatResponse(BaseChatResponse):
+    analysis: Optional[NiftiSourceResponse] = None
+
+
 class FhirSourceResponse(BaseSourceResponse):
     source_fhir_path: Optional[str] = None
     file_name: str = ""

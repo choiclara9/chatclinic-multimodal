@@ -544,7 +544,7 @@ type RawQcChatResponse = {
 };
 
 type SourceReadyResponse = {
-  source_type: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | "image" | "fhir";
+  source_type: "vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | "image" | "nifti" | "fhir";
   file_name: string;
   source_path: string;
   file_kind?: string | null;
@@ -625,6 +625,7 @@ type StudioView =
   | "igv"
   | "annotations"
   | "image_review"
+  | "nifti_review"
   | "fhir_browser";
 
 type RohStudioSegment = {
@@ -684,6 +685,11 @@ function isTextFileName(fileName: string) {
 function isSpreadsheetFileName(fileName: string) {
   const lowered = fileName.toLowerCase();
   return lowered.endsWith(".xlsx") || lowered.endsWith(".xlsm");
+}
+
+function isNiftiFileName(fileName: string) {
+  const lowered = fileName.toLowerCase();
+  return lowered.endsWith(".nii") || lowered.endsWith(".nii.gz");
 }
 
 function isDicomFileName(fileName: string) {
@@ -1283,12 +1289,13 @@ export default function Page() {
   const [spreadsheetAnalysis, setSpreadsheetAnalysis] = useState<SpreadsheetSourceResponse | null>(null);
   const [textAnalysis, setTextAnalysis] = useState<TextSourceResponse | null>(null);
   const [imageAnalysis, setImageAnalysis] = useState<ImageSourceResponse | null>(null);
+  const [niftiAnalysis, setNiftiAnalysis] = useState<any>(null);
   const [fhirAnalysis, setFhirAnalysis] = useState<FhirSourceResponse | null>(null);
   const [summaryStatsGridRows, setSummaryStatsGridRows] = useState<Array<Record<string, string>>>([]);
   const [summaryStatsHasMore, setSummaryStatsHasMore] = useState(false);
   const [summaryStatsRowsLoading, setSummaryStatsRowsLoading] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
-  const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | "image" | "fhir" | null>(null);
+  const [attachedSourceType, setAttachedSourceType] = useState<"vcf" | "raw_qc" | "summary_stats" | "text" | "spreadsheet" | "dicom" | "image" | "nifti" | "fhir" | null>(null);
   const [activeSource, setActiveSource] = useState<SourceReadyResponse | null>(null);
   const [uploadedSources, setUploadedSources] = useState<Array<{ name: string; sourceType: string; timestamp: number }>>([]);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
@@ -1369,11 +1376,13 @@ export default function Page() {
             ? textAnalysis.tool_registry
           : imageAnalysis?.tool_registry?.length
             ? imageAnalysis.tool_registry
+          : niftiAnalysis?.tool_registry?.length
+            ? niftiAnalysis.tool_registry
           : fhirAnalysis?.tool_registry?.length
             ? fhirAnalysis.tool_registry
           : toolRegistry;
-    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && !imageAnalysis && !fhirAnalysis && sessionModeModality) {
-      return (base ?? []).filter((t) => t.modality === sessionModeModality);
+    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && !imageAnalysis && !niftiAnalysis && !fhirAnalysis && sessionModeModality) {
+      return (base ?? []).filter((t: any) => t.modality === sessionModeModality);
     }
     return base;
   })();
@@ -1604,6 +1613,8 @@ export default function Page() {
     const guessedSourceType =
       isFhirFileName(file.name)
         ? "fhir"
+        : isNiftiFileName(file.name)
+        ? "nifti"
         : isRawQcFileName(file.name)
         ? "raw_qc"
         : isDicomFileName(file.name)
@@ -1634,6 +1645,8 @@ export default function Page() {
           ? "Uploading DICOM source..."
         : guessedSourceType === "image"
           ? "Uploading image source..."
+        : guessedSourceType === "nifti"
+          ? "Uploading NIfTI source..."
         : guessedSourceType === "text"
           ? "Uploading text source..."
           : guessedSourceType === "summary_stats"
@@ -1677,6 +1690,8 @@ export default function Page() {
       setTextAnalysis(null);
     } else if (guessedSourceType === "image") {
       setImageAnalysis(null);
+    } else if (guessedSourceType === "nifti") {
+      setNiftiAnalysis(null);
     } else if (guessedSourceType === "fhir") {
       setFhirAnalysis(null);
     }
@@ -1729,6 +1744,29 @@ export default function Page() {
         addMessage({
           role: "assistant",
           content: `Image source \`${file.name}\` is loaded and reviewed automatically. Open the Studio Image Review card to inspect metadata, EXIF data, and thumbnail preview.`,
+        });
+        event.target.value = "";
+        setPendingUploadRole("default");
+        return;
+      }
+
+      if (guessedSourceType === "nifti") {
+        const payload = await handleStartNiftiReview(file, { silent: true });
+        if (!payload) {
+          event.target.value = "";
+          setPendingUploadRole("default");
+          return;
+        }
+        setActiveSource({
+          source_type: "nifti",
+          file_name: payload.file_name,
+          source_path: payload.source_nifti_path ?? "",
+          file_kind: payload.file_kind,
+        });
+        setStatus("NIfTI review ready");
+        addMessage({
+          role: "assistant",
+          content: `NIfTI source \`${file.name}\` is loaded and reviewed automatically. Open the Studio NIfTI Review card to inspect volume metadata and interactive viewer.`,
         });
         event.target.value = "";
         setPendingUploadRole("default");
@@ -2629,6 +2667,51 @@ export default function Page() {
     }
   }
 
+  async function handleStartNiftiReview(
+    file: File,
+    options?: { silent?: boolean },
+  ): Promise<any | null> {
+    const silent = options?.silent ?? false;
+    setError(null);
+    setStatus("Running NIfTI review...");
+    if (!silent) {
+      addMessage({
+        role: "assistant",
+        content: "Reading NIfTI volume and extracting metadata, orientation, and slice previews.",
+        kind: "status",
+      });
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/nifti/upload`, {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      const payload = await response.json();
+      setNiftiAnalysis(payload);
+      activateStudioFromPayload(payload, "nifti_review", "nifti");
+      setStatus("NIfTI review ready");
+      setComposerText("");
+      return payload;
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setError(message);
+      setStatus("NIfTI review failed");
+      addMessage({
+        role: "assistant",
+        content: `NIfTI review failed: ${message}`,
+      });
+      return null;
+    }
+  }
+
   async function handleStartFhirReview(
     file: File,
     options?: { silent?: boolean },
@@ -2944,7 +3027,7 @@ export default function Page() {
       return;
     }
 
-    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && !imageAnalysis && !fhirAnalysis) {
+    if (!analysis && !rawQcAnalysis && !summaryStatsAnalysis && !dicomAnalysis && !spreadsheetAnalysis && !textAnalysis && !imageAnalysis && !niftiAnalysis && !fhirAnalysis) {
       addMessage({ role: "user", content: text });
       setComposerText("");
       addMessage({
@@ -2955,7 +3038,7 @@ export default function Page() {
     }
 
     // Count active sources — use multimodal endpoint when >1 source is loaded
-    const activeSourceCount = [analysis, rawQcAnalysis, summaryStatsAnalysis, dicomAnalysis, spreadsheetAnalysis, textAnalysis, imageAnalysis, fhirAnalysis].filter(Boolean).length;
+    const activeSourceCount = [analysis, rawQcAnalysis, summaryStatsAnalysis, dicomAnalysis, spreadsheetAnalysis, textAnalysis, imageAnalysis, niftiAnalysis, fhirAnalysis].filter(Boolean).length;
 
     if (activeSourceCount > 1) {
       setComposerText("");
@@ -3003,6 +3086,12 @@ export default function Page() {
     if (imageAnalysis) {
       setComposerText("");
       await handleAskImageQuestion(text);
+      return;
+    }
+
+    if (niftiAnalysis) {
+      setComposerText("");
+      await handleAskNiftiQuestion(text);
       return;
     }
 
@@ -3474,6 +3563,48 @@ export default function Page() {
     }
   }
 
+  async function handleAskNiftiQuestion(questionText?: string, analysisOverride?: any) {
+    const text = questionText?.trim() ?? "";
+    const activeAnalysis = analysisOverride ?? niftiAnalysis;
+    if (!text || !activeAnalysis) {
+      return;
+    }
+
+    setStatus("Generating answer...");
+    setAnalysisQa((current) => [...current, { role: "user", content: text }]);
+
+    try {
+      const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/v1/chat/nifti`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: text,
+          analysis: activeAnalysis,
+          history: analysisQa.map((turn) => ({ role: turn.role, content: turn.content })),
+          studio_context: studioContext,
+        }),
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const payload = await response.json();
+      if (payload.analysis) {
+        setNiftiAnalysis(payload.analysis);
+      }
+      activateStudioFromPayload(payload, "nifti_review", "nifti");
+      setAnalysisQa((current) => [...current, { role: "assistant", content: payload.answer }]);
+      setFollowUpAnswer(payload.answer);
+      setStatus("Answer ready");
+    } catch (caught) {
+      const msg = caught instanceof Error ? caught.message : String(caught);
+      setAnalysisQa((current) => [
+        ...current,
+        { role: "assistant", content: `Error: ${msg}` },
+      ]);
+      setStatus("Answer failed");
+    }
+  }
+
   async function handleAskFhirQuestion(questionText?: string, analysisOverride?: FhirSourceResponse | null) {
     const text = questionText?.trim() ?? "";
     const activeAnalysis = analysisOverride ?? fhirAnalysis;
@@ -3536,6 +3667,7 @@ export default function Page() {
           spreadsheet_analysis: spreadsheetAnalysis ?? undefined,
           dicom_analysis: dicomAnalysis ?? undefined,
           image_analysis: imageAnalysis ?? undefined,
+          nifti_analysis: niftiAnalysis ?? undefined,
           fhir_analysis: fhirAnalysis ?? undefined,
           primary_source_type: (() => {
             // Infer focused source from active studio view
@@ -3634,11 +3766,13 @@ export default function Page() {
         ? textAnalysis.draft_answer
       : imageAnalysis
         ? imageAnalysis.draft_answer
+      : niftiAnalysis
+        ? niftiAnalysis.draft_answer
       : fhirAnalysis
         ? fhirAnalysis.draft_answer
       : null;
   const displayedAnswer = followUpAnswer ?? summaryText;
-  const hasInteractiveState = Boolean(attachedFile || analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || imageAnalysis || fhirAnalysis || messages.length > 1);
+  const hasInteractiveState = Boolean(attachedFile || analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || imageAnalysis || niftiAnalysis || fhirAnalysis || messages.length > 1);
   const latestStatusMessage =
     [...messages].reverse().find((message) => message.kind === "status" || message.kind === "summary")?.content ?? "";
   const sourceStatusDetail = useMemo(() => {
@@ -3756,6 +3890,12 @@ export default function Page() {
     if (status === "Spreadsheet review failed") {
       return "Spreadsheet intake failed. Check the workbook format and whether the required parser dependency is installed.";
     }
+    if (status === "Uploading NIfTI source...") {
+      return "The NIfTI volume is being uploaded and prepared for review.";
+    }
+    if (status === "Running NIfTI review...") {
+      return "Extracting volume metadata, orientation, voxel dimensions, and generating slice previews.";
+    }
     if (status === "Uploading FHIR source...") {
       return "The FHIR source is being uploaded and prepared for clinical review.";
     }
@@ -3809,6 +3949,8 @@ export default function Page() {
     status === "Uploading summary statistics source..." ||
     status === "Uploading raw sequencing source..." ||
     status === "Uploading VCF source..." ||
+    status === "Uploading NIfTI source..." ||
+    status === "Running NIfTI review..." ||
     status === "Uploading FHIR source..." ||
     status === "Running FHIR review..." ||
     status === "Running FastQC..." ||
@@ -3841,7 +3983,7 @@ export default function Page() {
     status === "PLINK ready" ||
     status === "PLINK score ready"
       ? status
-      : analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || imageAnalysis || fhirAnalysis
+      : analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || textAnalysis || imageAnalysis || niftiAnalysis || fhirAnalysis
         ? analysis
           ? "Analysis ready"
           : rawQcAnalysis
@@ -3856,12 +3998,14 @@ export default function Page() {
                     ? "Text review ready"
                     : imageAnalysis
                       ? "Image review ready"
+                      : niftiAnalysis
+                        ? "NIfTI review ready"
                       : fhirAnalysis
                         ? "FHIR review ready"
                         : "Analysis ready"
         : status;
   const summaryTurn =
-    analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || imageAnalysis || fhirAnalysis
+    analysis || rawQcAnalysis || summaryStatsAnalysis || dicomAnalysis || spreadsheetAnalysis || imageAnalysis || niftiAnalysis || fhirAnalysis
       ? [
           {
             role: "assistant" as const,
@@ -4225,6 +4369,21 @@ export default function Page() {
       }
     }
 
+    // NIfTI cards
+    if (niftiAnalysis) {
+      if (niftiAnalysis.studio_cards?.length) {
+        niftiAnalysis.studio_cards.forEach((card: any) => {
+          cards.push({
+            id: String(card.id ?? "nifti_review") as StudioView,
+            title: String(card.title ?? "NIfTI Review"),
+            subtitle: String(card.subtitle ?? "Volume metadata and interactive viewer"),
+          });
+        });
+      } else {
+        cards.push({ id: "nifti_review" as StudioView, title: "NIfTI Review", subtitle: "Volume metadata and interactive viewer" });
+      }
+    }
+
     // FHIR cards
     if (fhirAnalysis) {
       if (fhirAnalysis.studio_cards?.length) {
@@ -4265,6 +4424,7 @@ export default function Page() {
     spreadsheetAnalysis,
     textAnalysis,
     imageAnalysis,
+    niftiAnalysis,
     fhirAnalysis,
     prsPrepResultForStudio,
     qqmanResultForStudio,
@@ -4641,9 +4801,39 @@ export default function Page() {
       };
     }
 
+    // --- NIfTI source ---
+    if (niftiAnalysis) {
+      if (!analysis && !dicomAnalysis && !spreadsheetAnalysis && !imageAnalysis) {
+        merged.current_card = {
+          file_name: niftiAnalysis.file_name,
+          shape: niftiAnalysis.shape?.join(" × "),
+          voxel_dims: niftiAnalysis.voxel_dims?.slice(0, 3).join(" × "),
+          orientation: niftiAnalysis.orientation,
+        };
+        merged.current_summary = {
+          shape: niftiAnalysis.shape,
+          voxel_dims: niftiAnalysis.voxel_dims,
+          orientation: niftiAnalysis.orientation,
+          datatype: niftiAnalysis.datatype,
+          is_4d: niftiAnalysis.is_4d,
+        };
+      }
+      allWarnings.push(...(Array.isArray(niftiAnalysis.warnings) ? niftiAnalysis.warnings.slice(0, 12) : []));
+      mergedExtra.nifti = {
+        file_name: niftiAnalysis.file_name,
+        shape: niftiAnalysis.shape,
+        voxel_dims: niftiAnalysis.voxel_dims,
+        orientation: niftiAnalysis.orientation,
+        datatype: niftiAnalysis.datatype,
+        is_4d: niftiAnalysis.is_4d,
+        fov_mm: niftiAnalysis.fov_mm,
+        metadata_items: niftiAnalysis.metadata_items,
+      };
+    }
+
     // --- FHIR source ---
     if (fhirAnalysis) {
-      if (!analysis && !dicomAnalysis && !spreadsheetAnalysis && !imageAnalysis) {
+      if (!analysis && !dicomAnalysis && !spreadsheetAnalysis && !imageAnalysis && !niftiAnalysis) {
         merged.current_card = {
           file_name: fhirAnalysis.file_name,
           resource_type: fhirAnalysis.resource_type,
@@ -4667,7 +4857,7 @@ export default function Page() {
       };
     }
 
-    if (!analysis && !dicomAnalysis && !spreadsheetAnalysis && !imageAnalysis && !fhirAnalysis) {
+    if (!analysis && !dicomAnalysis && !spreadsheetAnalysis && !imageAnalysis && !niftiAnalysis && !fhirAnalysis) {
       return {};
     }
 
@@ -4681,6 +4871,7 @@ export default function Page() {
     dicomAnalysis,
     spreadsheetAnalysis,
     imageAnalysis,
+    niftiAnalysis,
     fhirAnalysis,
     candidateVariants,
     clinicalCoverage,
@@ -4787,6 +4978,7 @@ export default function Page() {
                                       : st === "text" ? "Active text source"
                                       : st === "summary_stats" ? "Active summary statistics source"
                                       : st === "image" ? "Active image source"
+                                      : st === "nifti" ? "Active NIfTI source"
                                       : st === "fhir" ? "Active FHIR source"
                                       : "Active VCF source";
                                   })()}
@@ -4804,6 +4996,7 @@ export default function Page() {
                                 : src.sourceType === "dicom" ? "DICOM"
                                 : src.sourceType === "text" ? "Text"
                                 : src.sourceType === "summary_stats" ? "Summary Stats"
+                                : src.sourceType === "nifti" ? "NIfTI"
                                 : src.sourceType;
                               return (
                                 <article key={`src-${idx}`} className="sourceItem" style={{ opacity: 0.9, marginBottom: 4 }}>

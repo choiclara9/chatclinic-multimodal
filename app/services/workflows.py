@@ -10,6 +10,7 @@ from app.models import (
     DicomSourceResponse,
     FhirSourceResponse,
     ImageSourceResponse,
+    NiftiSourceResponse,
     PrsPrepResponse,
     RawQcResponse,
     SpreadsheetSourceResponse,
@@ -24,6 +25,7 @@ from plugins.cohort_sheet_browser_tool.logic import analyze_spreadsheet_source
 from plugins.dicom_review_tool.logic import analyze_dicom_source
 from plugins.fhir_browser_tool.logic import analyze_fhir_source
 from plugins.image_review_tool.logic import analyze_image_source
+from plugins.nifti_review_tool.logic import analyze_nifti_source
 from plugins.prs_prep_tool.logic import analyze_prs_prep
 from plugins.summary_stats_review_tool.logic import analyze_summary_stats
 from plugins.text_review_tool.logic import analyze_text_source
@@ -131,6 +133,13 @@ def analyze_fhir_workflow(path: str, original_name: str) -> FhirSourceResponse:
 
 def analyze_image_workflow(path: str, original_name: str) -> ImageSourceResponse:
     result = analyze_image_source(path, original_name)
+    result.analysis_id = str(uuid.uuid4())
+    result.tool_registry = discover_tools()
+    return result
+
+
+def analyze_nifti_workflow(path: str, original_name: str) -> NiftiSourceResponse:
+    result = analyze_nifti_source(path, original_name)
     result.analysis_id = str(uuid.uuid4())
     result.tool_registry = discover_tools()
     return result

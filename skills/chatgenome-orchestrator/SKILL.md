@@ -9,7 +9,7 @@ This skill defines the intended orchestration layer for `ChatGenome`.
 
 ## Welcome message
 
-Upload a source file to get started. Supported formats: DICOM images, PNG/JPG/TIFF images, FHIR clinical bundles (.fhir.json, .fhir.xml, .ndjson), VCF (variant interpretation), Excel workbooks, text/markdown notes, FASTQ/BAM/SAM (raw sequencing QC), and summary statistics. The appropriate tools will run automatically after upload. Type `@help` for detailed tool options and usage tips.
+Upload a source file to get started. Supported formats: DICOM images, PNG/JPG/TIFF images, NIfTI volumes (.nii, .nii.gz), FHIR clinical bundles (.fhir.json, .fhir.xml, .ndjson), VCF (variant interpretation), Excel workbooks, text/markdown notes, FASTQ/BAM/SAM (raw sequencing QC), and summary statistics. The appropriate tools will run automatically after upload. Type `@help` for detailed tool options and usage tips.
 
 ## Help message
 
@@ -20,6 +20,9 @@ Upload a source file to get started. Supported formats: DICOM images, PNG/JPG/TI
 
 **PNG / JPG / TIFF Image**
 - Auto: Image Review (metadata, EXIF, thumbnail)
+
+**NIfTI Volume (.nii, .nii.gz)**
+- Auto: NIfTI Review (shape, voxel dimensions, orientation, 3D viewer via Niivue)
 
 **FHIR Bundle**
 - Auto: FHIR Browser (patient, medications, labs, care team)

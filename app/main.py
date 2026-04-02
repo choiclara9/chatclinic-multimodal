@@ -24,6 +24,9 @@ from app.models import (
     ImageChatRequest,
     ImageChatResponse,
     ImageSourceResponse,
+    NiftiChatRequest,
+    NiftiChatResponse,
+    NiftiSourceResponse,
     GatkLiftoverVcfRequest,
     GatkLiftoverVcfResponse,
     LDBlockShowRequest,
@@ -72,6 +75,7 @@ from app.services.chat import (
     answer_dicom_chat,
     answer_fhir_chat,
     answer_image_chat,
+    answer_nifti_chat,
     answer_multimodal_chat,
     answer_raw_qc_chat,
     answer_source_chat,
@@ -318,7 +322,7 @@ def _run_source_bootstrap(
     durable_path: Path,
     file_name: str,
     **kwargs: object,
-) -> AnalysisResponse | DicomSourceResponse | ImageSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse | FhirSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | ImageSourceResponse | NiftiSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse | FhirSourceResponse:
     bootstrap_source_type = source_bootstrap_type(source_type)
     if load_bootstrap_manifest(bootstrap_source_type) is None:
         raise HTTPException(status_code=500, detail=f"The {source_type} bootstrap manifest is not available.")
@@ -338,6 +342,7 @@ def _run_source_bootstrap(
             "text": "Text intake",
             "dicom": "DICOM intake",
             "image": "Image intake",
+            "nifti": "NIfTI intake",
             "fhir": "FHIR intake",
         }.get(source_type, "Bootstrap analysis")
         raise HTTPException(status_code=400, detail=f"{label} failed: {exc}") from exc
@@ -348,7 +353,7 @@ def _persist_and_bootstrap_upload(
     file_name: str,
     data: bytes,
     **kwargs: object,
-) -> AnalysisResponse | DicomSourceResponse | ImageSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse | FhirSourceResponse:
+) -> AnalysisResponse | DicomSourceResponse | ImageSourceResponse | NiftiSourceResponse | RawQcResponse | SpreadsheetSourceResponse | SummaryStatsResponse | TextSourceResponse | FhirSourceResponse:
     bootstrap_source_type = source_bootstrap_type(source_type)
     durable_path = persist_uploaded_source_bytes(bootstrap_source_type, file_name, data)
     return _run_source_bootstrap(source_type, durable_path, file_name, **kwargs)
@@ -643,6 +648,11 @@ def chat_about_image(request: ImageChatRequest) -> ImageChatResponse:
     return answer_image_chat(request)
 
 
+@app.post("/api/v1/chat/nifti", response_model=NiftiChatResponse)
+def chat_about_nifti(request: NiftiChatRequest) -> NiftiChatResponse:
+    return answer_nifti_chat(request)
+
+
 @app.post("/api/v1/chat/fhir", response_model=FhirChatResponse)
 def chat_about_fhir(request: FhirChatRequest) -> FhirChatResponse:
     return answer_fhir_chat(request)
@@ -802,6 +812,18 @@ async def analyze_image_upload(file: UploadFile = File(...)) -> ImageSourceRespo
         await file.read(),
         ImageSourceResponse,
         "Unexpected bootstrap response type for image upload.",
+    )
+
+
+@app.post("/api/v1/nifti/upload", response_model=NiftiSourceResponse)
+async def analyze_nifti_upload(file: UploadFile = File(...)) -> NiftiSourceResponse:
+    filename = file.filename or "volume.nii.gz"
+    return _typed_bootstrap_upload(
+        "nifti",
+        filename,
+        await file.read(),
+        NiftiSourceResponse,
+        "Unexpected bootstrap response type for NIfTI upload.",
     )
 
 

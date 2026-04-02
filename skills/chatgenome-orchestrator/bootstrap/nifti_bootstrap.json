@@ -1,0 +1,6 @@
+{
+  "name": "nifti_bootstrap",
+  "source_type": "nifti",
+  "runner": "nifti",
+  "upload_subdir": "nifti"
+}
